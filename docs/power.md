@@ -51,6 +51,10 @@ with a partly guessed value before booting the firmware.
 10. That value and two-step sequence are exactly what the host-side
     default (`jh7110_power_event=1`) writes, and differ from the community
     patch's `0xff000703` in the GPU mask.
+11. Once the job is done the firmware powers the island **down** again
+    with the mirror sequence, `POWER_EVENT = 0x01000700` then
+    `0x01000702` ("HW Request On(1)/Off(0): 0 … Completed"), driven by its
+    own background-task self-kicks (emulated since fwemu delivers them).
 
 ## Conclusion so far
 
@@ -63,7 +67,9 @@ of a piece of the firmware.
 Prediction for hardware: case **D** passes. The new risk in D is the other
 half of the firmware's behaviour, powering the island **down** when idle
 ("Initiate powoff query for RD-DMs"), which has never run on a JH7110.
-That is why A stays the default until D has survived long benchmark runs. Whether the PMU hardware-event mask is
+Item 11 shows the exact power-down writes, so a hang in D after a
+job (rather than before it) points at this path. That is why A stays the
+default until D has survived long benchmark runs. Whether the PMU hardware-event mask is
 also required (i.e. whether the island's power switch is outside the GPU)
 is still open.
 

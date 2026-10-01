@@ -5,7 +5,7 @@ patched 6 TLB instructions: tlbwi@9fc02074, tlbr@9fc021d2, tlbwi@9fc02360, tlbwi
 executed 6279 instructions; firmware_started=1
 last PCs: c00089d4 c00089d8 c00089dc c00089de c00089e2 c00089e4 c00089e6 c00014e8 c00014ec c000143c c000143e c0016d4a c0016d4e c0016d52 c0016d56 c0016d5a
 connection: fw_state=2 os_state=0 alive_fw_token=0
-sysdata: pow_state=1
+sysdata: pow_state=1  osdata: kccb_cmds_executed=0  power_sync=0
 register writes: 99 (16 distinct registers), reads: 102
 firmware trace:
   [198] OSid 0 fw state transition request: from 2 to 0 (0-offline 1-ready 2-active 3-offloading). Status 1 (1-ok 0-fail)

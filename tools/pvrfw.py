@@ -21,6 +21,9 @@ Sub-commands:
     check-ddk FW --ddk DIR        cross-check device info against the
                                   Imagination DDK per-core headers (hwdefs)
     extract FW OUTDIR             dump each layout section to its own file
+    devinfo FW                    print the device info as JSON (pack's input)
+    pack --elf E --device J -o FW wrap a MIPS firmware ELF into the container,
+                                  with device info encoded from JSON
 
 Bit -> name orderings are read from the kernel's pvr_rogue_fwif_dev_info.h
 when --kernel points at a Linux tree; a built-in copy (from v7.3-rc5) is
@@ -401,6 +404,153 @@ def cmd_extract(fw, args):
     return 0
 
 
+# -- packing -------------------------------------------------------------------
+PVR_FW_FLAGS_OPEN_SOURCE = 1
+# MIPS layout (pvr_rogue_mips.h / the Imagination build): id, type, base,
+# max size. Allocation sizes follow the ELF; boot data and stack are one
+# page each and carry no ELF content.
+MIPS_LAYOUT = [
+    ("MIPS_CODE", 1, 0xC0000000, 192512),
+    ("MIPS_EXCEPTIONS_CODE", 1, 0x9FC02000, 8192),
+    ("MIPS_BOOT_CODE", 1, 0xBFC00000, 4096),
+    ("MIPS_PRIVATE_DATA", 2, 0xC0032000, 32768),
+    ("MIPS_BOOT_DATA", 2, 0xBFC01000, 4096),
+    ("MIPS_STACK", 2, 0xCF600000, 4096),
+]
+MIPS_MIN_ALLOC = {"MIPS_PRIVATE_DATA": 3 * FW_BLOCK}
+
+
+def roundup(x, a=FW_BLOCK):
+    return (x + a - 1) // a * a
+
+
+def devinfo_json(fw):
+    feats = fw.features()
+    return {"bvnc": fw.bvnc_str, "brns": fw.quirks(), "erns": fw.enhancements(),
+            "features": feats}
+
+
+def encode_devinfo(t, dev):
+    """Inverse of Firmware's device-info parsing (pvr_device_info.c)."""
+    def mask(names, table, what):
+        bitset = 0
+        for n in names:
+            if n not in table:
+                raise ValueError("%s %s unknown to the kernel tables" % (what, n))
+            bitset |= 1 << table.index(n)
+        nq = max(1, (bitset.bit_length() + 63) // 64)
+        return [(bitset >> (64 * i)) & (2**64 - 1) for i in range(nq)]
+
+    brn = mask(dev["brns"], t.brns, "BRN")
+    ern = mask(dev["erns"], t.erns, "ERN")
+    feat = mask(dev["features"], t.features, "feature")
+    params = []
+    for name in t.features:          # params in feature-bit order
+        if name in dev["features"] and name in t.valued:
+            v = dev["features"][name]
+            if v is None:
+                raise ValueError("feature %s needs a value" % name)
+            params.append(int(v))
+        elif name in dev["features"] and dev["features"][name] is not None:
+            raise ValueError("feature %s takes no value" % name)
+    blob = DEVINFO_HDR.pack(len(brn), len(ern), len(feat), len(params))
+    blob += struct.pack("<%dQ" % (len(brn) + len(ern) + len(feat) + len(params)),
+                        *(brn + ern + feat + params))
+    if len(blob) > FW_BLOCK:
+        raise ValueError("device info exceeds 4 KiB")
+    return blob + b"\0" * (FW_BLOCK - len(blob))
+
+
+def mips_layout(elf_info):
+    """Layout table for a MIPS ELF: same sections, bases and limits as
+    Imagination's images, allocation sizes from the ELF's segments."""
+    need = {}
+    for p in elf_info["phdrs"]:
+        if p["type"] != 1 or not p["memsz"]:
+            continue
+        for name, _typ, base, maxsz in MIPS_LAYOUT:
+            if base <= p["vaddr"] < base + maxsz:
+                end = p["vaddr"] + p["memsz"] - base
+                if end > maxsz:
+                    raise ValueError("segment at 0x%08x exceeds %s (%d > %d bytes)" % (
+                        p["vaddr"], name, end, maxsz))
+                need[name] = max(need.get(name, 0), end)
+                break
+        else:
+            raise ValueError("segment at 0x%08x is in no MIPS layout section" % p["vaddr"])
+    entries, offset = [], {1: 0, 2: 0}
+    for name, typ, base, maxsz in MIPS_LAYOUT:
+        alloc = max(roundup(need.get(name, 0)) or FW_BLOCK, MIPS_MIN_ALLOC.get(name, 0))
+        entries.append(dict(id=SECTION_IDS.index(name), type=typ, base=base, max_size=maxsz,
+                            alloc_size=alloc, alloc_offset=offset[typ]))
+        offset[typ] += alloc
+    code_end = 0xC0000000 + offset[1]
+    if code_end > MIPS_LAYOUT[3][2]:
+        raise ValueError("code allocation (0x%x) overlaps private data at 0x%08x" % (
+            offset[1], MIPS_LAYOUT[3][2]))
+    return entries
+
+
+def pack(elf_bytes, layout, devinfo, bvnc, version, flags=PVR_FW_FLAGS_OPEN_SOURCE):
+    major, minor, build = version
+    hdr = INFO_HDR.pack(3, INFO_HDR.size, len(layout), LAYOUT_ENTRY.size, bvnc, FW_BLOCK,
+                        flags, major, minor, build, len(devinfo), 0)
+    for e in layout:
+        hdr += LAYOUT_ENTRY.pack(e["id"], e["type"], e["base"], e["max_size"],
+                                 e["alloc_size"], e["alloc_offset"])
+    hdr += b"\0" * (FW_BLOCK - len(hdr))
+    body = elf_bytes + b"\0" * (roundup(len(elf_bytes)) - len(elf_bytes))
+    return body + devinfo + hdr
+
+
+def parse_bvnc(s):
+    b, v, n, c = (int(x) for x in s.split("."))
+    return b << 48 | v << 32 | n << 16 | c
+
+
+def cmd_devinfo(fw, args):
+    import json
+    print(json.dumps(devinfo_json(fw), indent=2))
+    return 0
+
+
+def cmd_pack(args, t):
+    import json
+    dev = json.load(open(args.device))
+    elf_bytes = open(args.elf, "rb").read()
+    tmp = Firmware.__new__(Firmware)
+    tmp.data = elf_bytes
+    info = Firmware.elf(tmp)
+    if not info or info.get("machine") != "MIPS":
+        print("%s: not a MIPS ELF" % args.elf)
+        return 1
+    if args.layout_from:
+        layout = Firmware(args.layout_from, t).layout
+    else:
+        layout = mips_layout(info)
+    version = tuple(int(x) for x in args.version.split("."))
+    out = pack(elf_bytes, layout, encode_devinfo(t, dev), parse_bvnc(dev["bvnc"]), version)
+    # Round-trip through the parser the other sub-commands (and fwemu) use.
+    open(args.output, "wb").write(out)
+    fw = Firmware(args.output, t)
+    if devinfo_json(fw) != {"bvnc": dev["bvnc"], "brns": sorted(dev["brns"], key=t.brns.index),
+                            "erns": sorted(dev["erns"], key=t.erns.index),
+                            "features": {k: dev["features"][k] for k in t.features
+                                         if k in dev["features"]}}:
+        print("internal error: device info does not round-trip")
+        return 1
+    print("wrote %s: %d bytes, %s v%d.%d build %d, %d layout entries" % (
+        args.output, len(out), dev["bvnc"], version[0], version[1], version[2], len(layout)))
+    if args.compare:
+        ref = Firmware(args.compare, t)
+        a = out[-2 * FW_BLOCK:-FW_BLOCK]
+        b = ref.data[-2 * FW_BLOCK:-FW_BLOCK]
+        print("device info vs %s: %s" % (args.compare, "identical" if a == b else "DIFFERENT"))
+        if a != b:
+            return 1
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -418,12 +568,24 @@ def main():
     s = sub.add_parser("extract")
     s.add_argument("fw")
     s.add_argument("outdir")
+    s = sub.add_parser("devinfo")
+    s.add_argument("fw")
+    s = sub.add_parser("pack")
+    s.add_argument("--elf", required=True)
+    s.add_argument("--device", required=True, help="device description JSON")
+    s.add_argument("--version", default="1.0.0", help="MAJOR.MINOR.BUILD")
+    s.add_argument("--layout-from", help="copy the layout table from this image")
+    s.add_argument("--compare", help="require identical device info to this image")
+    s.add_argument("-o", "--output", required=True)
     args = ap.parse_args()
     t = Tables(args.kernel)
+    if args.cmd == "pack":
+        return cmd_pack(args, t)
     if args.cmd == "diff":
         return cmd_diff(Firmware(args.a, t), Firmware(args.b, t), args)
     fw = Firmware(args.fw, t)
-    return {"info": cmd_info, "check-ddk": cmd_check_ddk, "extract": cmd_extract}[args.cmd](fw, args)
+    return {"info": cmd_info, "check-ddk": cmd_check_ddk, "extract": cmd_extract,
+            "devinfo": cmd_devinfo}[args.cmd](fw, args)
 
 
 if __name__ == "__main__":

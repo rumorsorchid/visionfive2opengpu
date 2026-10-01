@@ -68,13 +68,13 @@ JAL_BUG_ALIAS_PA = 0x17C00000
 
 PAGE = 0x1000
 
-# The firmware's register poll routine, poll(reg_offset, value, mask, ...)
-# (v1.0 b6503725; it logs "HW poll ... failed" on timeout). The model
-# completes every polled hardware operation by presenting the awaited value.
+# Imagination's register poll routine, poll(reg_offset, value, mask, ...)
+# (it logs "HW poll ... failed" on timeout). The model completes every
+# polled hardware operation by presenting the awaited value.
 # poll_mc(core_mask, reg_offset, value, mask) is the per-core variant.
-# Values: (reg, value, mask) argument registers.
-POLL_FUNCS = {"36.50.54.182": {0xC0008C7C: ("a0", "a1", "a2"),
-                               0xC0008D8C: ("a1", "a2", "a3")}}
+# Keyed by "BVNC/build"; values: (reg, value, mask) argument registers.
+POLL_FUNCS = {"36.50.54.182/6503725": {0xC0008C7C: ("a0", "a1", "a2"),
+                                       0xC0008D8C: ("a1", "a2", "a3")}}
 
 # Reset values the firmware relies on. CLK_CTRL comes out of reset with
 # every unit in automatic clock gating (DDK rgxdefs_km.h: CLK_CTRL_ALL_AUTO
@@ -169,7 +169,8 @@ class Emu:
         self.regs = dict(RESET_VALUES)
         self.remaps = {}
         self.remap_log = []
-        self.pending_irq = False
+        self.pending_tasks = []
+        self.parked = False
         self.event_status = 0
         self.power_events = []
         self.polls = []
@@ -264,9 +265,14 @@ class Emu:
         tlbwi/tlbwr/tlbr/tlbp with a 32-bit nop, in emulator memory only."""
         self.tlb_patches = []
         self.swm_sites = {}
+        self.eret_addrs = set()
         with tempfile.TemporaryDirectory() as tmp:
             lines = disassemble(self.fw, tmp)
         for line in lines:
+            m = re.match(r"^\s*([0-9a-f]+):\s+0000 f37c\s+eret", line)
+            if m:
+                self.eret_addrs.add(int(m.group(1), 16))
+                continue
             m = re.match(r"^\s*([0-9a-f]+):\s+(?:[0-9a-f]{4}\s?){1,2}\s+swm\s+(\S+)", line)
             if m:
                 self.swm_sites[int(m.group(1), 16)] = parse_swm(m.group(2))
@@ -351,9 +357,10 @@ class Emu:
                 self.reg_name(off), off, value, uc.reg_read(UC_MIPS_REG_PC)))
         self.reg_log.append(("W", off, value))
         if off & ~0x200000 == 0x0B00:
-            # Firmware kicking its own MTS: on hardware this raises the
-            # IRQ-task interrupt once the current handler returns.
-            self.pending_irq = True
+            # Firmware kicking its own MTS: on hardware this schedules the
+            # interrupt task (CONTEXT = INTCTX, 0x20) or the background
+            # task once the current handler returns.
+            self.pending_tasks.append("irq" if value & 0x20 else "bg")
         self.reg_model_write(off, value)
 
     def reg_model_read(self, off):
@@ -429,9 +436,12 @@ class Emu:
     def setup_host(self):
         L, fw = self.L, self.fw
         feats = fw.features()
-        # Code: cached; data, stack: cached too in the kernel (FW object default).
-        self.map_pages(self.code_va, 0x19000, uncached=False)
-        self.map_pages(self.data_va, 0x5000, uncached=False)
+        # The kernel maps the code and data objects (sizes from the layout
+        # table) uncached; the firmware's wired mappings choose their own.
+        code_size = sum(e["alloc_size"] for e in fw.layout if e["type"] == 1)
+        data_size = sum(e["alloc_size"] for e in fw.layout if e["type"] == 2)
+        self.map_pages(self.code_va, code_size)
+        self.map_pages(self.data_va, data_size)
 
         # Boot data (pvr_mips_init + boot_data at BOOTLDR_CONF_OFFSET 0).
         bd = self.boot_data_va
@@ -524,7 +534,8 @@ class Emu:
         last_pcs = []
 
         pending = []
-        poll_funcs = POLL_FUNCS.get(self.fw.bvnc_str, {}) if self.args.complete_polls else {}
+        poll_funcs = (POLL_FUNCS.get("%s/%d" % (self.fw.bvnc_str, self.fw.ver_build), {})
+                      if self.args.complete_polls else {})
         argreg = {"a0": MC.UC_MIPS_REG_A0, "a1": MC.UC_MIPS_REG_A1,
                   "a2": MC.UC_MIPS_REG_A2, "a3": MC.UC_MIPS_REG_A3}
 
@@ -554,6 +565,9 @@ class Emu:
                 ea = (uc.reg_read(GPR[base]) + off) & 0xffffffff
                 for i, r in enumerate(regs):
                     pending.append((ea + 4 * i, uc.reg_read(GPR[r])))
+            if self.stop_at_eret and addr in self.eret_addrs:
+                uc.emu_stop()
+                return
             self.insns += 1
             last_pcs.append(addr)
             if len(last_pcs) > 64:
@@ -592,28 +606,40 @@ class Emu:
         uc.mem_map(tramp_pa, PAGE)
         uc.mem_write(tramp_pa, struct.pack("<4I", 0x3c19bfc0, 0x37390001, 0x03200008, 0))
         self.last_pcs = last_pcs
-        self.insn_limit = self.args.max_insns
+        self.trace_seen = 0
+        started = self.boot()
+        for cmd in self.args.kccb or []:
+            self.kccb_scenario(cmd)
+        return started
+
+    def boot(self):
+        """Release the core from reset (pvr_fw_start) and run it until it
+        idles. Also used for the reboot after a runtime resume: firmware
+        memory, page table and the kernel's structures are kept."""
+        uc = self.uc
+        self.insn_limit = self.insns + self.args.max_insns
+        self.stop_at_eret = False
+        self.parked = False
+        self.pending_tasks = []
+        uc.reg_write(MC.UC_MIPS_REG_CP0_STATUS, 0x00400004)    # reset: BEV | ERL
+        before = self.insns
         try:
             uc.emu_start(0xBFC03000, 0xFFFFFFFF, count=0)
         except UcError as e:
             print("!! emulation stopped: %s at pc=0x%08x" % (e, uc.reg_read(UC_MIPS_REG_PC)))
         started = self.get("rogue_fwif_sysinit", SYSINIT_VA, "firmware_started")
-        print("\nexecuted %d instructions; firmware_started=%d" % (self.insns, started))
-        print("last PCs:", " ".join("%08x" % p for p in last_pcs[-16:]))
-        self.trace_seen = 0
+        print("\nexecuted %d instructions; firmware_started=%d" % (self.insns - before, started))
+        print("last PCs:", " ".join("%08x" % p for p in self.last_pcs[-16:]))
         self.report()
-        for cmd in self.args.kccb or []:
-            self.kccb_scenario(cmd)
         return started
 
     # -- kernel CCB + interrupts ------------------------------------------------------
     KCCB_CMDS = {"health": 115, "pow-units": 107, "pow-idle": 107, "pow-cancel-idle": 107,
-                 "pow-off": 107, "logtype": 206}
+                 "pow-off": 107, "logtype": 206, "mmucache": 102}
     # Vectored interrupts (Cause.IV, IntCtl.VS = 0x100) at EBase 0x9FC02000:
-    # IP2 CP0 timer, IP3 MTS background task (preemptible: re-enables
-    # interrupts with IP2/IP3 masked), IP4 MTS interrupt task.
-    IRQ_VECTORS = {"timer": (0x9FC02400, 0x9FC02466), "bg": (0x9FC02500, 0x9FC02566),
-                   "irq": (0x9FC02600, 0x9FC026F6)}
+    # IP2 CP0 timer, IP3 MTS background task, IP4 MTS interrupt task. A
+    # handler runs from its vector until it reaches an eret.
+    IRQ_VECTORS = {"timer": 0x9FC02400, "bg": 0x9FC02500, "irq": 0x9FC02600}
 
     def send_kccb(self, cmd_type, fields=()):
         K = "rogue_fwif_kccb_cmd"
@@ -632,19 +658,37 @@ class Emu:
         self.reg_model_write(0x0B00, 0)
         return wo
 
+    def is_parked(self):
+        """Stopped right after a `wait` with interrupts disabled: the
+        firmware has halted itself (e.g. after a power-off request)."""
+        uc = self.uc
+        pc = uc.reg_read(UC_MIPS_REG_PC)
+        prev = bytes(uc.mem_read(virt_to_phys(pc - 4), 4))
+        return prev == b"\x00\x00\x7c\x93" and not uc.reg_read(MC.UC_MIPS_REG_CP0_STATUS) & 1
+
     def inject(self, name):
-        start, eret = self.IRQ_VECTORS[name]
+        if self.parked:
+            print("  %s interrupt not delivered: core parked" % name)
+            return
+        start = self.IRQ_VECTORS[name]
         uc = self.uc
         st = uc.reg_read(MC.UC_MIPS_REG_CP0_STATUS)
         uc.reg_write(MC.UC_MIPS_REG_CP0_STATUS, st | 0x2)  # EXL
         before = self.insns
         self.insn_limit = self.insns + self.args.max_insns
+        self.stop_at_eret = True
         try:
-            uc.emu_start(start | 1, eret, count=0)
+            uc.emu_start(start | 1, 0xFFFFFFFF, count=0)
         except UcError as e:
             print("!! %s irq: %s at pc=0x%08x" % (name, e, uc.reg_read(UC_MIPS_REG_PC)))
             self.report()
             self.dump_hot_polls()
+        if self.is_parked():
+            self.parked = True
+            print("  %s irq: core parked in `wait` with interrupts disabled at 0x%08x "
+                  "after %d instructions" % (name, uc.reg_read(UC_MIPS_REG_PC),
+                                             self.insns - before))
+            return
         uc.reg_write(MC.UC_MIPS_REG_CP0_STATUS, st)
         print("  %s irq handled in %d instructions, stopped at 0x%08x" % (
             name, self.insns - before, uc.reg_read(UC_MIPS_REG_PC)))
@@ -721,17 +765,24 @@ class Emu:
                 next(v for k, o, v in reversed(recent) if o == off)))
 
     def drain_irqs(self):
-        for _ in range(8):
-            if not self.pending_irq:
+        for _ in range(16):
+            if not self.pending_tasks:
                 break
-            self.pending_irq = False
-            self.inject("irq")
+            self.inject(self.pending_tasks.pop(0))
 
     def kccb_scenario(self, spec):
         name, _, arg = spec.partition("=")
         fields = []
         if name == "compute":
             self.compute_kick()
+            return
+        if name == "reboot":
+            # Runtime resume: the kernel restarts the firmware without
+            # reloading it or touching sysinit.firmware_started; clear the
+            # flag here so the new boot is observable.
+            print("\n== reboot (runtime resume)")
+            self.set("rogue_fwif_sysinit", SYSINIT_VA, "firmware_started", 0)
+            self.boot()
             return
         if name == "timer":
             print("\n== CP0 timer interrupt")
@@ -747,6 +798,12 @@ class Emu:
         elif name == "pow-off":
             fields = [("cmd_data.pow_data.pow_type", 1),  # OFF_REQ
                       ("cmd_data.pow_data.power_req_data.forced", 1)]
+        elif name == "mmucache":
+            # pvr_mmu_flush_exec() with PVR_MMU_SYNC_LEVEL_2_FLAGS
+            sync = self.objects["mmucache_sync"][0]
+            fields = [("cmd_data.mmu_cache_data.cache_flags", int(arg or "0x400001f", 0)),
+                      ("cmd_data.mmu_cache_data.mmu_cache_sync_fw_addr", sync),
+                      ("cmd_data.mmu_cache_data.mmu_cache_sync_update_value", 0)]
         elif name == "pow-units":
             fields = [("cmd_data.pow_data.pow_type", 3),  # NUM_UNITS_CHANGE
                       ("cmd_data.pow_data.power_req_data.num_of_dusts", int(arg or "1", 0))]
@@ -772,7 +829,11 @@ class Emu:
             self.get(C, CONN_CTL_VA, "connection_os_state"),
             self.get(C, CONN_CTL_VA, "alive_fw_token")))
         sysdata = self.objects["sysdata"][0]
-        print("sysdata: pow_state=%d" % self.get("rogue_fwif_sysdata", sysdata, "pow_state"))
+        osdata = self.objects["osdata"][0]
+        print("sysdata: pow_state=%d  osdata: kccb_cmds_executed=%d  power_sync=%d" % (
+            self.get("rogue_fwif_sysdata", sysdata, "pow_state"),
+            self.get("rogue_fwif_osdata", osdata, "kccb_cmds_executed"),
+            self.r32(self.objects["power_sync"][0])))
         writes = [(o, v) for k, o, v in self.reg_log if k == "W"]
         print("register writes: %d (%d distinct registers), reads: %d" % (
             len(writes), len({o for o, _ in writes}), len(self.reg_log) - len(writes)))
@@ -800,7 +861,7 @@ def main():
                     help="do not satisfy the firmware's register polls automatically")
     ap.add_argument("--kccb", action="append",
                     help="after boot, in order: health, pow-idle, pow-cancel-idle, pow-units=N, "
-                         "pow-off, logtype, compute (a CDM kick + completion), "
+                         "pow-off, logtype, mmucache[=FLAGS], reboot (runtime resume), compute (a CDM kick + completion), "
                          "or timer (CP0 timer interrupt)")
     ap.add_argument("--watch", action="append",
                     help="log writes to ADDR or LO-HI (virtual addresses)")

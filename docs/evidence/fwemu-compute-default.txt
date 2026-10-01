@@ -5,7 +5,7 @@ patched 6 TLB instructions: tlbwi@9fc02074, tlbr@9fc021d2, tlbwi@9fc02360, tlbwi
 executed 6279 instructions; firmware_started=1
 last PCs: c00089d4 c00089d8 c00089dc c00089de c00089e2 c00089e4 c00089e6 c00014e8 c00014ec c000143c c000143e c0016d4a c0016d4e c0016d52 c0016d56 c0016d5a
 connection: fw_state=2 os_state=0 alive_fw_token=0
-sysdata: pow_state=1
+sysdata: pow_state=1  osdata: kccb_cmds_executed=0  power_sync=0
 register writes: 99 (16 distinct registers), reads: 102
 firmware trace:
   [198] OSid 0 fw state transition request: from 2 to 0 (0-offline 1-ready 2-active 3-offloading). Status 1 (1-ok 0-fail)
@@ -20,13 +20,15 @@ firmware trace:
   [382] Host Sync Partition marker: 1
 
 == compute kick: KCCB slot 0, cCCB woff 136
-  bg irq handled in 1283 instructions, stopped at 0x9fc02562
-  irq irq handled in 59681 instructions, stopped at 0x9fc026f2
-  irq irq handled in 712 instructions, stopped at 0x9fc026f2
+  bg irq handled in 1283 instructions, stopped at 0x9fc02566
+  irq irq handled in 59681 instructions, stopped at 0x9fc026f6
+  irq irq handled in 712 instructions, stopped at 0x9fc026f6
+  bg irq handled in 1135 instructions, stopped at 0x9fc02566
+  bg irq handled in 369 instructions, stopped at 0x9fc02566
   cCCB read_offset=0
 connection: fw_state=2 os_state=0 alive_fw_token=0
-sysdata: pow_state=1
-register writes: 234 (132 distinct registers), reads: 6314
+sysdata: pow_state=1  osdata: kccb_cmds_executed=1  power_sync=0
+register writes: 237 (132 distinct registers), reads: 6352
 firmware trace:
   [395] Bg Task OSid = 0
   [407] KCCB Slot 0: Cmd=0x2abc0065, OSid=0
@@ -49,23 +51,42 @@ firmware trace:
   [4206] Irq Task (EVENT_STATUS=0x00000000)
   [4227] Check Pow state: Int: 0x2, Ext: 0x1, Pow flags: 0x0, Fence Counters: Check: 0 - Update: 0
   [4239] Irq Task complete.
+  [4250] Bg Task OSid = 0
+  [4310] Bg Task complete DM Bitfield: 0
+  [4321] Bg Task OSid = 0
+  [4334] Bg Task complete DM Bitfield: 0
 
 == CDM finished (EVENT_STATUS.COMPUTE_FINISHED)
-  irq irq handled in 97973 instructions, stopped at 0x9fc026f2
-  irq irq handled in 940 instructions, stopped at 0x9fc026f2
+  irq irq handled in 97973 instructions, stopped at 0x9fc026f6
+  bg irq handled in 612 instructions, stopped at 0x9fc02566
+  bg irq handled in 491 instructions, stopped at 0x9fc02566
+  irq irq handled in 1288 instructions, stopped at 0x9fc026f6
+  irq irq handled in 959 instructions, stopped at 0x9fc026f6
   cCCB read_offset=136
 connection: fw_state=2 os_state=0 alive_fw_token=0
-sysdata: pow_state=1
-register writes: 252 (140 distinct registers), reads: 12438
+sysdata: pow_state=3  osdata: kccb_cmds_executed=1  power_sync=0
+register writes: 263 (141 distinct registers), reads: 12571
 firmware trace:
-  [4251] Irq Task (EVENT_STATUS=0x00000004)
-  [4266] Compute finished
-  [10305] Deactivate MemCtx=0xc0120000
-  [10314] Ungrab reg set 0 refcount now 0
-  [10331] Check Pow state: Int: 0x2, Ext: 0x1, Pow flags: 0x0, Fence Counters: Check: 0 - Update: 0
-  [10342] Initiate powoff query for RD-DMs.
-  [10363] Irq Task complete.
-  [10374] Irq Task (EVENT_STATUS=0x00000000)
-  [10394] Check Pow state: Int: 0x6, Ext: 0x1, Pow flags: 0x0, Fence Counters: Check: 0 - Update: 1
-  [10405] Any RD-DM pending? 0, Any RD-DM Active? 0
-  [10422] Irq Task complete.
+  [4345] Irq Task (EVENT_STATUS=0x00000004)
+  [4360] Compute finished
+  [10399] Deactivate MemCtx=0xc0120000
+  [10408] Ungrab reg set 0 refcount now 0
+  [10425] Check Pow state: Int: 0x2, Ext: 0x1, Pow flags: 0x0, Fence Counters: Check: 0 - Update: 0
+  [10436] Initiate powoff query for RD-DMs.
+  [10457] Irq Task complete.
+  [10467] Bg Task OSid = 0
+  [10487] Bg Task complete DM Bitfield: 1
+  [10495] Kick MTS Irq task DM=0
+  [10505] Bg Task OSid = 0
+  [10518] Bg Task complete DM Bitfield: 1
+  [10526] Kick MTS Irq task DM=0
+  [10537] Irq Task (EVENT_STATUS=0x00000000)
+  [10557] Check Pow state: Int: 0x6, Ext: 0x1, Pow flags: 0x0, Fence Counters: Check: 1 - Update: 1
+  [10568] Any RD-DM pending? 0, Any RD-DM Active? 0
+  [10578] Idle timer start. Pow state int: 0x6, ext: 0x1, flags: 0x0
+  [10588] GPU idle (might be powered down). Pow state int: 0x6, ext: 0x1, flags: 0x0
+  [10606] Irq Task complete.
+  [10618] Irq Task (EVENT_STATUS=0x00000000)
+  [10638] Check Pow state: Int: 0x6, Ext: 0x3, Pow flags: 0x0, Fence Counters: Check: 1 - Update: 1
+  [10648] Any RD-DM pending? 0, Any RD-DM Active? 0
+  [10666] Irq Task complete.

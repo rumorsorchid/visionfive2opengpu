@@ -76,7 +76,8 @@ in emulator memory.
 the interrupts the hardware would raise:
 
 ```sh
-fwemu.py FW --kernel ~/linux --kccb health
+fwemu.py FW --kernel ~/linux --kccb health --kccb mmucache --kccb logtype
+fwemu.py FW --kernel ~/linux --kccb pow-idle --kccb pow-off --kccb reboot --kccb health
 fwemu.py FW --kernel ~/linux --kccb pow-idle --kccb pow-units=1 --kccb pow-cancel-idle
 fwemu.py FW --kernel ~/linux --kccb compute                  # CDM job + completion
 fwemu.py FW --kernel ~/linux --config-flags 0x10 --kccb compute   # with POW_RASCALDUST
@@ -88,13 +89,25 @@ signals `EVENT_STATUS.COMPUTE_FINISHED`. The firmware logs the same steps
 as on hardware ("Kick Compute: FWCtx …", "Compute finished",
 "Deactivate MemCtx"), and the client CCB read offset advances.
 
+`pow-idle` then `pow-off` is the driver's runtime-suspend sequence;
+`reboot` is runtime resume (the same image restarted, kernel CCB
+continuing). The report shows `pow_state`, `kccb_cmds_executed` and
+`power_sync`, the fields the driver reads.
+
 Interrupt model (vectored, EBase `0x9FC02000`, 0x100 spacing): IP2
 CP0 timer, IP3 MTS background task (kernel CCB), IP4 MTS interrupt task.
-A handler is run from its vector to its `eret`; when the firmware kicks
-its own MTS the follow-up IRQ task is delivered after the handler returns.
+A handler runs from its vector to the first `eret`. When the firmware
+kicks its own MTS, the follow-up task (interrupt task for `0x20`,
+background task otherwise) is delivered after the handler returns. A core
+that stops in `wait` with interrupts disabled is reported as parked and
+gets no further interrupts.
 
-Hardware completion model: the firmware's two poll routines
-(`0xc0008c7c`, per-core variant `0xc0008d8c`) are hooked and every polled
+Any image in the container format runs, including `openfw/`;
+`openfw/test_contract.py` uses this emulator to compare images against
+the driver's expectations.
+
+Hardware completion model: Imagination's two poll routines
+(`0xc0008c7c`, per-core variant `0xc0008d8c` in v1.0 b6503725) are hooked and every polled
 condition is satisfied immediately; `EVENT_STATUS` bits stay set until
 the firmware writes `EVENT_CLEAR`; `POWER_EVENT` with `REQ_EN` raises
 `POWER_COMPLETE`; `CLK_CTRL` starts at its all-auto reset value.
@@ -103,6 +116,5 @@ the firmware writes `EVENT_CLEAR`; `POWER_EVENT` with `REQ_EN` raises
 
 * Geometry/fragment kicks (render targets, free lists, PM): the hard part
   of an open firmware, and the path that needs a parameter-manager model.
-* A register-trace diff mode (blob vs. replacement firmware, same
-  scenario) to make this a differential test bench for M0–M2 in
-  `docs/firmware.md`.
+* A built-in register-trace diff (today: run both images with
+  `--trace-regs` and diff, as done for openfw's boot sequence).
