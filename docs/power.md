@@ -36,12 +36,34 @@ with a partly guessed value before booting the firmware.
 8. The firmware keeps `sysdata.config_flags` in a global and tests bit 4
    (`POW_RASCALDUST`) at 15 sites.
 
+### From running the firmware (`tools/fwemu`, transcripts in `evidence/`)
+
+9. Booting the firmware and submitting the same compute job twice in the
+   emulator:
+   * with upstream's config flags it never touches `POWER_EVENT` and runs
+     the job as if the island were powered
+     ([fwemu-compute-default.txt](evidence/fwemu-compute-default.txt));
+   * with `POW_RASCALDUST` it logs "Changing number of dusts from 0 to 1",
+     writes `POWER_EVENT = 0x01000701` then `0x01000703`, logs
+     "HW Request On(1)/Off(0): 1, Units: 0x0000000001000703 … Completed",
+     and only then runs the job
+     ([fwemu-compute-pow-rascaldust.txt](evidence/fwemu-compute-pow-rascaldust.txt)).
+10. That value and two-step sequence are exactly what the host-side
+    default (`jh7110_power_event=1`) writes, and differ from the community
+    patch's `0xff000703` in the GPU mask.
+
 ## Conclusion so far
 
-Everything points to **the firmware being designed to power the island
-itself when `POW_RASCALDUST` is set** — which StarFive's driver does and
-the upstream driver doesn't. The host-side POWER_EVENT write reproduces a
-piece of the firmware's own routine. Whether the PMU hardware-event mask is
+The firmware **powers the island itself when `POW_RASCALDUST` is set** —
+which StarFive's driver does and the upstream driver doesn't — and the
+emulator shows it doing so with the same register writes the host-side
+workaround performs. The host-side POWER_EVENT write is a re-implementation
+of a piece of the firmware.
+
+Prediction for hardware: case **D** passes. The new risk in D is the other
+half of the firmware's behaviour, powering the island **down** when idle
+("Initiate powoff query for RD-DMs"), which has never run on a JH7110.
+That is why A stays the default until D has survived long benchmark runs. Whether the PMU hardware-event mask is
 also required (i.e. whether the island's power switch is outside the GPU)
 is still open.
 

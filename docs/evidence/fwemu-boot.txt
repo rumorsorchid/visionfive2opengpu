@@ -1,0 +1,20 @@
+$ fwemu.py upstream/rogue_36.50.54.182_v1.fw --kernel linux
+found 140 swm sites (Unicorn SWM workaround)
+patched 6 TLB instructions: tlbwi@9fc02074, tlbr@9fc021d2, tlbwi@9fc02360, tlbwi@9fc0270e, tlbr@9fc02724, tlbwi@9fc0282c
+
+executed 6279 instructions; firmware_started=1
+last PCs: c00089d4 c00089d8 c00089dc c00089de c00089e2 c00089e4 c00089e6 c00014e8 c00014ec c000143c c000143e c0016d4a c0016d4e c0016d52 c0016d56 c0016d5a
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=1
+register writes: 99 (16 distinct registers), reads: 102
+firmware trace:
+  [198] OSid 0 fw state transition request: from 2 to 0 (0-offline 1-ready 2-active 3-offloading). Status 1 (1-ok 0-fail)
+  [212] OSid 0 CCB init status: 1 (1-ok 0-fail): kCCBCtl@0xc0100000 kCCB@0xc0101000 fwCCBCtl@0xc0105000 fwCCB@0xc0106000
+  [245] Initialised Firmware with config flags 0x00000000 and extended config flags 0x00000000
+  [271] OSid 0 fw state transition request: from 2 to 2 (0-offline 1-ready 2-active 3-offloading). Status 1 (1-ok 0-fail)
+  [282] Initialised OS 0 with config flags 0x00000000
+  [305] Core clock set to 409600000 Hz
+  [313] Active PM latency set to 0ms. Core clock: 409600000 Hz
+  [325] GPU init
+  [332] GPIO enabled
+  [382] Host Sync Partition marker: 1

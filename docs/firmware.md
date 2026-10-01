@@ -93,11 +93,11 @@ would be the first open PowerVR Rogue firmware.
 1. **Tooling** (done here): image parser/diff (`pvrfw.py`), register
    census (`fwregs.py`), and **`tools/fwemu`**, which boots the real
    firmware against a modelled register file and the kernel's own init
-   structures. It reaches `firmware_started` and logs the same init trace
-   as real hardware, and can inject the firmware's interrupts. That is the
-   executable specification and differential test bench for a
-   replacement. Next: model the MTS task registers so kernel-CCB commands
-   are consumed, then a compute kick.
+   structures. It reaches `firmware_started` with the same init trace as
+   real hardware, consumes kernel-CCB commands (health check, power
+   requests) and runs a complete **compute job** (kick → "Kick Compute" →
+   completion → "Compute finished"). That is the executable specification
+   and test bench for M0–M2 of a replacement. Next: geometry/fragment.
 2. **M0 – boot handshake.** An open image in the same container format
    that boots, reports its OS state as active and answers health checks.
    The upstream driver then probes and stays up with no jobs submitted.

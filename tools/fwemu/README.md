@@ -70,11 +70,39 @@ Also: TLB refills are not delivered to the guest, so the M14K fixed-mapping
 MMU is used and the firmware's six TLB instructions are replaced with nops
 in emulator memory.
 
+## Submitting work
+
+`--kccb` submits kernel-CCB commands after boot, in order, and delivers
+the interrupts the hardware would raise:
+
+```sh
+fwemu.py FW --kernel ~/linux --kccb health
+fwemu.py FW --kernel ~/linux --kccb pow-idle --kccb pow-units=1 --kccb pow-cancel-idle
+fwemu.py FW --kernel ~/linux --kccb compute                  # CDM job + completion
+fwemu.py FW --kernel ~/linux --config-flags 0x10 --kccb compute   # with POW_RASCALDUST
+```
+
+`compute` builds what the kernel builds for a Vulkan dispatch (FW memory
+context, compute context, client CCB with a CDM command, KICK), then
+signals `EVENT_STATUS.COMPUTE_FINISHED`. The firmware logs the same steps
+as on hardware ("Kick Compute: FWCtx …", "Compute finished",
+"Deactivate MemCtx"), and the client CCB read offset advances.
+
+Interrupt model (vectored, EBase `0x9FC02000`, 0x100 spacing): IP2
+CP0 timer, IP3 MTS background task (kernel CCB), IP4 MTS interrupt task.
+A handler is run from its vector to its `eret`; when the firmware kicks
+its own MTS the follow-up IRQ task is delivered after the handler returns.
+
+Hardware completion model: the firmware's two poll routines
+(`0xc0008c7c`, per-core variant `0xc0008d8c`) are hooked and every polled
+condition is satisfied immediately; `EVENT_STATUS` bits stay set until
+the firmware writes `EVENT_CLEAR`; `POWER_EVENT` with `REQ_EN` raises
+`POWER_COMPLETE`; `CLK_CTRL` starts at its all-auto reset value.
+
 ## Next steps
 
-* Deliver kernel CCB commands (health check, MMU cache ops, power
-  requests) by modelling the MTS kick interrupt, then a compute kick. That
-  turns this into the differential test bench for an open firmware
-  (`docs/firmware.md`).
-* Use it to watch what the firmware does with `POW_RASCALDUST` when work
-  arrives (the open question in `docs/power.md`).
+* Geometry/fragment kicks (render targets, free lists, PM): the hard part
+  of an open firmware, and the path that needs a parameter-manager model.
+* A register-trace diff mode (blob vs. replacement firmware, same
+  scenario) to make this a differential test bench for M0–M2 in
+  `docs/firmware.md`.
