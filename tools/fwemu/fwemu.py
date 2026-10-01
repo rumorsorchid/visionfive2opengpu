@@ -417,6 +417,8 @@ class Emu:
         kccb_rtn = obj("kccb_rtn", size=(1 << kccb_n) * 4)
         fwccb_ctl = obj("fwccb_ctl", "rogue_fwif_ccb_ctl")
         fwccb = obj("fwccb", size=(1 << fwccb_n) * L.size("rogue_fwif_fwccb_cmd"))
+        self.kccb_ctl, self.kccb, self.kccb_rtn, self.kccb_n = kccb_ctl, kccb, kccb_rtn, kccb_n
+        self.fwccb_ctl, self.fwccb = fwccb_ctl, fwccb
         for ctl, n, cmd in ((kccb_ctl, kccb_n, "rogue_fwif_kccb_cmd"),
                             (fwccb_ctl, fwccb_n, "rogue_fwif_fwccb_cmd")):
             self.set("rogue_fwif_ccb_ctl", ctl, "wrap_mask", (1 << n) - 1)
@@ -528,6 +530,7 @@ class Emu:
         tramp_pa = 0x1FC03000
         uc.mem_map(tramp_pa, PAGE)
         uc.mem_write(tramp_pa, struct.pack("<4I", 0x3c19bfc0, 0x37390001, 0x03200008, 0))
+        self.last_pcs = last_pcs
         try:
             uc.emu_start(0xBFC03000, 0xFFFFFFFF, count=0)
         except UcError as e:
@@ -535,8 +538,60 @@ class Emu:
         started = self.get("rogue_fwif_sysinit", SYSINIT_VA, "firmware_started")
         print("\nexecuted %d instructions; firmware_started=%d" % (self.insns, started))
         print("last PCs:", " ".join("%08x" % p for p in last_pcs[-16:]))
+        self.trace_seen = 0
         self.report()
+        for cmd in self.args.kccb or []:
+            self.kccb_scenario(cmd)
         return started
+
+    # -- kernel CCB + interrupts ------------------------------------------------------
+    KCCB_CMDS = {"health": 115, "pow-units": 107, "logtype": 206}
+    IRQ_VECTORS = {"timer": (0x9FC02400, 0x9FC02466), "gpu": (0x9FC02500, 0x9FC02566),
+                   "bg": (0x9FC02600, 0x9FC026F6)}
+
+    def send_kccb(self, cmd_type, fields=()):
+        K = "rogue_fwif_kccb_cmd"
+        size = self.L.size(K)
+        wo = self.get("rogue_fwif_ccb_ctl", self.kccb_ctl, "write_offset")
+        slot = self.kccb + wo * size
+        self.write(slot, b"\0" * size)
+        self.set(K, slot, "cmd_type", cmd_type | 0x2ABC0000)
+        for path, value in fields:
+            self.set(K, slot, path, value)
+        self.w32(self.kccb_rtn + wo * 4, 0)
+        self.set("rogue_fwif_ccb_ctl", self.kccb_ctl, "write_offset",
+                 (wo + 1) & ((1 << self.kccb_n) - 1))
+        # pvr_fw_mts_schedule(PVR_FWIF_DM_GP): host write to MTS_SCHEDULE
+        self.reg_model_write(0x0B00, 0)
+        return wo
+
+    def inject(self, name):
+        start, eret = self.IRQ_VECTORS[name]
+        uc = self.uc
+        st = uc.reg_read(MC.UC_MIPS_REG_CP0_STATUS)
+        uc.reg_write(MC.UC_MIPS_REG_CP0_STATUS, st | 0x2)  # EXL
+        before = self.insns
+        try:
+            uc.emu_start(start | 1, eret, count=0)
+        except UcError as e:
+            print("!! %s irq: %s at pc=0x%08x" % (name, e, uc.reg_read(UC_MIPS_REG_PC)))
+        uc.reg_write(MC.UC_MIPS_REG_CP0_STATUS, st)
+        print("  %s irq handled in %d instructions, stopped at 0x%08x" % (
+            name, self.insns - before, uc.reg_read(UC_MIPS_REG_PC)))
+
+    def kccb_scenario(self, spec):
+        name, _, arg = spec.partition("=")
+        fields = []
+        if name == "pow-units":
+            fields = [("cmd_data.pow_data.pow_type", 3),  # NUM_UNITS_CHANGE
+                      ("cmd_data.pow_data.power_req_data.num_of_dusts", int(arg or "1", 0))]
+        slot = self.send_kccb(self.KCCB_CMDS[name], fields)
+        print("\n== KCCB %s -> slot %d, MTS kick, background-task interrupt" % (spec, slot))
+        self.inject("bg")
+        print("  kccb read_offset=%d rtn[%d]=0x%x" % (
+            self.get("rogue_fwif_ccb_ctl", self.kccb_ctl, "read_offset"), slot,
+            self.r32(self.kccb_rtn + slot * 4)))
+        self.report()
 
     def trace(self):
         tp = self.get("rogue_fwif_tracebuf", self.tracebuf_ctl, "tracebuf[0].trace_pointer")
@@ -556,9 +611,11 @@ class Emu:
         print("register writes: %d (%d distinct registers), reads: %d" % (
             len(writes), len({o for o, _ in writes}), len(self.reg_log) - len(writes)))
         if self.args.trace_mask:
-            print("\nfirmware trace:")
-            for ts, msg in self.trace():
+            entries = self.trace()
+            print("firmware trace:")
+            for ts, msg in entries[self.trace_seen:]:
                 print("  [%d] %s" % (ts, msg))
+            self.trace_seen = len(entries)
 
 
 def main():
@@ -573,6 +630,8 @@ def main():
     ap.add_argument("--max-insns", type=int, default=2_000_000)
     ap.add_argument("--trace-regs", action="store_true")
     ap.add_argument("--trace-exc", action="store_true")
+    ap.add_argument("--kccb", action="append",
+                    help="after boot, submit a kernel CCB command: health, pow-units=N, logtype")
     ap.add_argument("--watch", action="append",
                     help="log writes to ADDR or LO-HI (virtual addresses)")
     args = ap.parse_args()

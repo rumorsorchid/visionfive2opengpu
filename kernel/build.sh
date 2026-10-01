@@ -11,8 +11,13 @@
 # OUT        build directory (default: ./build)
 #
 # Cross-compiles from x86_64 with riscv64-linux-gnu-gcc, or builds natively
-# on a riscv64 host. Produces Debian packages (linux-image/-headers) in the
-# parent of OUT, plus Image, modules and the VisionFive 2 DTBs under OUT.
+# on a riscv64 host. Produces Debian packages in the parent of OUT
+# (linux-image and linux-libc-dev; also linux-headers on native builds),
+# plus Image, modules and the VisionFive 2 DTBs under OUT.
+#
+# Host packages (Debian/Ubuntu):
+#   gcc-riscv64-linux-gnu bc bison flex kmod libssl-dev libelf-dev
+#   libdw-dev python3 rsync debhelper dpkg-dev
 
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -59,7 +64,12 @@ if [ -n "$missing" ]; then
 fi
 
 $MAKE Image modules dtbs
-$MAKE bindeb-pkg
+# Cross builds skip linux-headers: it would need the target's libssl/libelf.
+if [ -n "$CROSS" ]; then
+	DEB_BUILD_PROFILES=pkg.linux-upstream.nokernelheaders $MAKE bindeb-pkg
+else
+	$MAKE bindeb-pkg
+fi
 
 echo
 echo "Image: $OUT/arch/riscv/boot/Image"

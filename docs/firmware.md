@@ -90,11 +90,14 @@ would be the first open PowerVR Rogue firmware.
 
 ### A sensible path
 
-1. **Tooling** (started here): image parser/diff (`pvrfw.py`), register
-   census (`fwregs.py`). Next: an emulator harness that boots the real
-   firmware against a modelled register file and the kernel's real init
-   structures, logging every register access. That gives an executable
-   specification and a differential test bench for a replacement.
+1. **Tooling** (done here): image parser/diff (`pvrfw.py`), register
+   census (`fwregs.py`), and **`tools/fwemu`**, which boots the real
+   firmware against a modelled register file and the kernel's own init
+   structures. It reaches `firmware_started` and logs the same init trace
+   as real hardware, and can inject the firmware's interrupts. That is the
+   executable specification and differential test bench for a
+   replacement. Next: model the MTS task registers so kernel-CCB commands
+   are consumed, then a compute kick.
 2. **M0 – boot handshake.** An open image in the same container format
    that boots, reports its OS state as active and answers health checks.
    The upstream driver then probes and stays up with no jobs submitted.

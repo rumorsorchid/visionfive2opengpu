@@ -27,7 +27,7 @@ rest on a real board.
 | Rascal/dust power-up | firmware-derived host sequence; vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
 | Mesa | 26.1+ supports BXE-4-32, non-conformant (`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`) | [board/cts.md](board/cts.md) |
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
-| Open firmware | analysis tooling + roadmap, no replacement yet | [docs/firmware.md](docs/firmware.md) |
+| Open firmware | analysis tooling + an emulator that boots Imagination's firmware; no replacement yet | [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
 | OpenBSD | roadmap + first patch (uncached DRAM alias) | [docs/openbsd.md](docs/openbsd.md) |
 
 Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
@@ -40,14 +40,15 @@ Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
 On an x86_64 (or riscv64) build host:
 
 ```sh
-sudo apt install gcc-riscv64-linux-gnu flex bison bc libssl-dev libelf-dev dpkg-dev
+sudo apt install gcc-riscv64-linux-gnu bc bison flex kmod libssl-dev libelf-dev \
+                 libdw-dev python3 rsync debhelper dpkg-dev
 ./kernel/build.sh                 # clones v7.3-rc5, applies patches, builds .debs
 ```
 
-On the board (Debian/Ubuntu riscv64), after installing the kernel `.deb`s
-and the DTB `jh7110-starfive-visionfive-2-v1.3b.dtb`:
+On the board (Debian/Ubuntu riscv64):
 
 ```sh
+sudo board/install-kernel.sh linux-image-*.deb   # kernel + DTB wiring (extlinux or EFI)
 sudo board/setup.sh rogue_36.50.54.182_v1.fw   # firmware, modprobe opts, Mesa env
 sudo reboot
 sudo board/vf2-gpu-check.sh --run              # verify + report file
@@ -82,8 +83,10 @@ board/bench.sh headless                        # benchmarks
 
 ```
 kernel/    patch series on v7.3-rc5, config fragment, build script
-board/     on-board scripts: setup, health check, benchmarks, power A/B, register probe, CTS guide
-tools/     pvrfw.py (firmware container/device-info/DDK cross-check), fwregs.py (register census)
+board/     on-board scripts: kernel install, setup, health check, benchmarks, power A/B,
+           register probe, CTS guide
+tools/     pvrfw.py (firmware container/device-info/DDK cross-check), fwregs.py (register census),
+           fwemu/ (boots the real firmware in an emulator, decodes its trace)
 docs/      analysis, power investigation, firmware, tuning, OpenBSD
 firmware/  where to get the firmware and how to verify it
 openbsd/   OpenBSD patches

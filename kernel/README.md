@@ -16,6 +16,7 @@ On an x86_64 host with `riscv64-linux-gnu-gcc` 13.3:
 | Binding negative tests (JH7110 node with 3 clocks / 1 reset; TI node with 5 clocks) | rejected as intended |
 | `CHECK_DTBS=y jh7110-starfive-visionfive-2-v1.3b.dtb` | no warnings |
 | `checkpatch.pl --strict` on patches 27–30, 40–41 | only a trailer-capitalisation nit (`Co-Authored-By`) |
+| `build.sh` on a fresh v7.3-rc5 clone (`git am` of all 41, build, `bindeb-pkg`) | `linux-image` .deb with `powervr.ko`, `verisilicon-dc.ko`, and the v1.3b DTB |
 
 **Not done here:** booting it. There is no VisionFive 2 in this
 environment; everything hardware-facing needs `board/` run on a real
