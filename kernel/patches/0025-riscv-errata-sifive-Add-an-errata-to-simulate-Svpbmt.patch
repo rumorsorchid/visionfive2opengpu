@@ -1,0 +1,275 @@
+From a7fbe00569576806240ba14a19398d5add032a5c Mon Sep 17 00:00:00 2001
+From: Bo Gan <ganboing@gmail.com>
+Date: Sun, 15 Mar 2026 23:03:28 -0700
+Subject: [PATCH 25/41] riscv: errata: sifive: Add an "errata" to simulate
+ Svpbmt on cores without
+
+On some platforms with pre-Svpbmt Sifive cores, they map the system
+memory twice in physical address space, one as cached (through the
+front port), and the other as uncached (through the system port), to
+enable drivers working with non-cache-coherent devices. Drivers can map
+the DMA buffers uncached through the uncached alias, and don't have to
+flush caches explicitly. It eases the driver programming. For complex
+device drivers, such as the GPU, this is a must have, as DMA pages can
+be mmap'ed to user space, and the userspace can't do caches flushes due
+to the lack of Zicbom on these older cores.
+
+Introduce a Sifive "errata" to model such setup with a customized
+version of Svpbmt, "XPbmtUC", where a single, artificial bit in the PTE
+is used for cache/uncache control (UC), effectively offsetting the PPN
+by power-of-2. I.e.,
+
+Starfive JH7110 (Sifive U74):
+           [0x0,   0x40000000) Low MMIO
+    [0x40000000, 0x2_40000000) Cached Mem
+  [0x4_40000000, 0x6_40000000) Uncached Mem UC+
+  [0x9_00000000, 0x9_d0000000) High MMIO
+
+Using PTE bit 32 (PPN bit 34) as UC (uncache) control perfectly matches
+the memory map of the SoC.
+
+Other SoCs like ESWIN EIC770X is not directly compatible to this model,
+as the uncached regions are not power-of-2 offseted, and the offsets are
+different between Dies in the dual-die version (EIC7702). The firmware,
+however, could use G-stage page table to transparently re-map, and make
+the address space suitable for XPbmtUC scheme to be applied:
+
+             [0x0,     0x20000000) Core Internal
+      [0x20000000,     0x40000000) Core Internal (Die 1)
+      [0x40000000,     0x60000000) Low MMIO
+      [0x60000000,     0x80000000) Low MMIO (Die 1)
+      [0x80000000,  0x10_80000000) Cached Mem
+   [0x20_00000000,  0x30_00000000) Cached Mem (Die 1)
+   [0x80_00000000,  0xa0_00000000) High MMIO
+   [0xa0_00000000,  0xc0_00000000) High MMIO (Die 1)
+   [0xc0_00000000,  0xd0_00000000) Uncached Mem <----------.
+   [0xe0_00000000,  0xf0_00000000) Uncached Mem (Die 1) <--+--.
+ with firmware/hypervisor re-mapping:                      |  |
+ ------------------------------------                      |  |
+  [0x100_80000000, 0x110_80000000) Mem UC+ ----------------'  |
+  [0x120_00000000, 0x130_00000000) Mem UC+ (Die 1) -----------'
+
+Such firmware capability is detected at boot time by sbi ecalls. The
+firmware will provide us the UC bit position if re-map is in effect.
+
+Note: currently this feature is gated by JH7110 and EIC770X SoCs to
+avoid unnecessary sbi ecalls. There's also no IO bit in such XPbmtUC
+scheme, as it's assumed that the PMA (hard-wired on these SoCs) will
+convey the strongly-ordered, non-idempotent attribute of MMIO regions.
+
+Signed-off-by: Bo Gan <ganboing@gmail.com>
+---
+ arch/riscv/Kconfig.errata                    | 13 ++++
+ arch/riscv/errata/sifive/errata.c            | 72 ++++++++++++++++++++
+ arch/riscv/include/asm/errata_list.h         | 19 +++++-
+ arch/riscv/include/asm/errata_list_vendors.h |  3 +-
+ arch/riscv/include/asm/pgtable-64.h          |  9 ++-
+ 5 files changed, 112 insertions(+), 4 deletions(-)
+
+diff --git a/arch/riscv/Kconfig.errata b/arch/riscv/Kconfig.errata
+index 3c945d086c..0722dc8df4 100644
+--- a/arch/riscv/Kconfig.errata
++++ b/arch/riscv/Kconfig.errata
+@@ -76,6 +76,19 @@ config ERRATA_SIFIVE_CIP_1200
+ 
+ 	  If you don't know what to do here, say "Y".
+ 
++config ERRATA_SIFIVE_XPBMTUC
++	bool "Support XPbmtUC (customized uncache bit)"
++	depends on ERRATA_SIFIVE && 64BIT && MMU
++	default y
++	select DMA_DIRECT_REMAP
++	help
++	  This will detect and enable the XPbmtUC, where a bit in PTE
++	  is chosen as the UC (uncache) control bit to emulate Svpbmt
++	  on supported SoCs. For SoCs with non-cache-coherent devices,
++	  enabling XPbmtUC allows drivers to map DMA buffers uncached.
++
++	  If you don't know what to do here, say "Y".
++
+ config ERRATA_STARFIVE_JH7100
+ 	bool "StarFive JH7100 support"
+ 	depends on ARCH_STARFIVE
+diff --git a/arch/riscv/errata/sifive/errata.c b/arch/riscv/errata/sifive/errata.c
+index b13c401cc6..47699b9075 100644
+--- a/arch/riscv/errata/sifive/errata.c
++++ b/arch/riscv/errata/sifive/errata.c
+@@ -8,11 +8,37 @@
+ #include <linux/module.h>
+ #include <linux/string.h>
+ #include <linux/bug.h>
++#include <linux/of.h>
+ #include <asm/text-patching.h>
+ #include <asm/alternative.h>
+ #include <asm/vendorid_list.h>
+ #include <asm/errata_list.h>
+ #include <asm/vendor_extensions.h>
++#include <asm/cacheflush.h>
++#include <asm/sbi.h>
++
++#define SIFIVE_SBI_EXT_SIFIVE		0x09000489
++#define SIFIVE_SBI_EXT_XPBMTUC_PRESENT	0x50425543 // PBUC
++
++#ifdef CONFIG_ERRATA_SIFIVE_XPBMTUC
++
++u64 riscv_xpbmtuc_mask;
++EXPORT_SYMBOL(riscv_xpbmtuc_mask);
++
++static const struct {
++	const char *machine;
++	int xpbmtuc_bit;
++} xpbmtuc_platforms[] = {
++	{
++		.machine = "starfive,jh7110",
++		.xpbmtuc_bit = 32
++	},
++	{
++		.machine = "eswin,eic7700",
++		.xpbmtuc_bit = -1 // detect
++	},
++};
++#endif
+ 
+ struct errata_info_t {
+ 	char name[32];
+@@ -51,6 +77,46 @@ static bool errata_cip_1200_check_func(unsigned long  arch_id, unsigned long imp
+ 	return true;
+ }
+ 
++#ifdef CONFIG_ERRATA_SIFIVE_XPBMTUC
++static void detect_xpbmtuc(void)
++{
++	int riscv_xpbmtuc_bit = -1, i;
++	struct sbiret ret;
++
++	for (i = 0; i < ARRAY_SIZE(xpbmtuc_platforms); i++) {
++		if (!of_machine_is_compatible(xpbmtuc_platforms[i].machine))
++			continue;
++
++		riscv_xpbmtuc_bit = xpbmtuc_platforms[i].xpbmtuc_bit;
++		if (riscv_xpbmtuc_bit >= 0)
++			break;
++
++		ret = sbi_ecall(SIFIVE_SBI_EXT_SIFIVE,
++				SIFIVE_SBI_EXT_XPBMTUC_PRESENT,
++				0, 0, 0, 0, 0, 0);
++		riscv_xpbmtuc_bit = ret.error ? -1 : ret.value;
++		break;
++	}
++	if (riscv_xpbmtuc_bit < 0)
++		return;
++
++	riscv_xpbmtuc_mask = 1UL << riscv_xpbmtuc_bit;
++	pr_info("Using XPbmtUC bit %d\n", riscv_xpbmtuc_bit);
++}
++
++static bool errata_xpbmtuc_check_func(unsigned long arch_id, unsigned long impid)
++{
++	return riscv_xpbmtuc_mask != 0;
++}
++#else
++static void detect_xpbmtuc(void) { }
++
++static bool errata_xpbmtuc_check_func(unsigned long arch_id, unsigned long impid)
++{
++	return false;
++}
++#endif
++
+ static struct errata_info_t errata_list[ERRATA_SIFIVE_NUMBER] = {
+ 	{
+ 		.name = "cip-453",
+@@ -60,6 +126,10 @@ static struct errata_info_t errata_list[ERRATA_SIFIVE_NUMBER] = {
+ 		.name = "cip-1200",
+ 		.check_func = errata_cip_1200_check_func
+ 	},
++	{
++		.name = "xpbmtuc",
++		.check_func = errata_xpbmtuc_check_func
++	},
+ };
+ 
+ static u32 __init_or_module sifive_errata_probe(unsigned long archid,
+@@ -88,6 +158,8 @@ void sifive_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+ 
+ 	if (stage == RISCV_ALTERNATIVES_EARLY_BOOT)
+ 		return;
++	else if (stage == RISCV_ALTERNATIVES_BOOT)
++		detect_xpbmtuc();
+ 
+ 	cpu_req_errata = sifive_errata_probe(archid, impid);
+ 
+diff --git a/arch/riscv/include/asm/errata_list.h b/arch/riscv/include/asm/errata_list.h
+index 6694b5ccdc..a05086f05a 100644
+--- a/arch/riscv/include/asm/errata_list.h
++++ b/arch/riscv/include/asm/errata_list.h
+@@ -53,18 +53,33 @@ asm(ALTERNATIVE(	\
+ 	: /* no inputs */	\
+ 	: "memory")
+ 
++#ifdef CONFIG_64BIT
++#define ALT_PAGE_CUST_BIT(_bit)						\
++asm(ALTERNATIVE("li %0, 0\t\nnop",					\
++		"1: auipc %0, %%pcrel_hi(riscv_xpbmtuc_mask)\t\n"	\
++		      "ld %0, %%pcrel_lo(1b)(%0)", SIFIVE_VENDOR_ID,	\
++			ERRATA_SIFIVE_XPBMTUC,				\
++			CONFIG_ERRATA_SIFIVE_XPBMTUC)			\
++		: "=r"(_bit))
++#endif
++
+ /*
+  * _val is marked as "will be overwritten", so need to set it to 0
+  * in the default case.
+  */
+ #define ALT_SVPBMT_SHIFT 61
+ #define ALT_THEAD_MAE_SHIFT 59
++#define HAS_XPBMTUC_PAGE_NOCACHE	CONFIG_ERRATA_SIFIVE_XPBMTUC
++#define HAS_XPBMTUC_PAGE_MTMASK		CONFIG_ERRATA_SIFIVE_XPBMTUC
+ #define ALT_SVPBMT(_val, prot)						\
+-asm(ALTERNATIVE_2("li %0, 0\t\nnop",					\
++asm(ALTERNATIVE_3("li %0, 0\t\nnop",					\
+ 		  "li %0, %1\t\nslli %0,%0,%3", 0,			\
+ 			RISCV_ISA_EXT_SVPBMT, CONFIG_RISCV_ISA_SVPBMT,	\
+ 		  "li %0, %2\t\nslli %0,%0,%4", THEAD_VENDOR_ID,	\
+-			ERRATA_THEAD_MAE, CONFIG_ERRATA_THEAD_MAE)	\
++			ERRATA_THEAD_MAE, CONFIG_ERRATA_THEAD_MAE,	\
++		  "1: auipc %0, %%pcrel_hi(riscv_xpbmtuc_mask)\t\n"	\
++			"ld %0, %%pcrel_lo(1b)(%0)", SIFIVE_VENDOR_ID,	\
++			ERRATA_SIFIVE_XPBMTUC, HAS_XPBMTUC##prot)	\
+ 		: "=r"(_val)						\
+ 		: "I"(prot##_SVPBMT >> ALT_SVPBMT_SHIFT),		\
+ 		  "I"(prot##_THEAD >> ALT_THEAD_MAE_SHIFT),		\
+diff --git a/arch/riscv/include/asm/errata_list_vendors.h b/arch/riscv/include/asm/errata_list_vendors.h
+index ec7eba3734..b2bf8d7a52 100644
+--- a/arch/riscv/include/asm/errata_list_vendors.h
++++ b/arch/riscv/include/asm/errata_list_vendors.h
+@@ -11,7 +11,8 @@
+ #ifdef CONFIG_ERRATA_SIFIVE
+ #define	ERRATA_SIFIVE_CIP_453 0
+ #define	ERRATA_SIFIVE_CIP_1200 1
+-#define	ERRATA_SIFIVE_NUMBER 2
++#define	ERRATA_SIFIVE_XPBMTUC 2
++#define	ERRATA_SIFIVE_NUMBER 3
+ #endif
+ 
+ #ifdef CONFIG_ERRATA_THEAD
+diff --git a/arch/riscv/include/asm/pgtable-64.h b/arch/riscv/include/asm/pgtable-64.h
+index 6e789fa585..7f47a361d8 100644
+--- a/arch/riscv/include/asm/pgtable-64.h
++++ b/arch/riscv/include/asm/pgtable-64.h
+@@ -76,7 +76,14 @@ typedef struct {
+  * | 63 | 62 61 | 60 54 | 53  10 | 9             8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
+  *   N      MT     RSV    PFN      reserved for SW   D   A   G   U   X   W   R   V
+  */
+-#define _PAGE_PFN_MASK  GENMASK(53, 10)
++static inline u64 riscv_pfn_mask(void)
++{
++	u64 cust_bit;
++
++	ALT_PAGE_CUST_BIT(cust_bit);
++	return GENMASK(53, 10) ^ cust_bit;
++}
++#define _PAGE_PFN_MASK  riscv_pfn_mask()
+ 
+ /*
+  * [63] Svnapot definitions:

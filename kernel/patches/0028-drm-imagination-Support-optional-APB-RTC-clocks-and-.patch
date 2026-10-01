@@ -1,0 +1,170 @@
+From 0cc4902760c39287588cf65e03de6c7e49c81532 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 17:08:40 +0000
+Subject: [PATCH 28/41] drm/imagination: Support optional APB/RTC clocks and
+ multiple resets
+
+The StarFive JH7110 gates the GPU's APB register interface and its RTC
+reference clock separately from the core/mem/sys clocks, and holds the GPU
+in reset through two lines: the APB bus reset and the core ("domain A")
+reset. StarFive's vendor driver enables both extra clocks and then releases
+the two resets in that order.
+
+Look up optional "apb" and "rtc" clocks and handle them alongside the
+existing ones in the manual power sequence, and acquire the resets as an
+optional reset array. A reset array is released in device tree order, which
+is the order the JH7110 needs, and behaves exactly like the single optional
+reset for platforms that describe zero or one line, so existing users are
+unaffected.
+
+Based on "drm/imagination: enable JH7110's extra GPU clocks and secondary
+reset line" by Dominique Belhachemi, reworked to be generic and to match
+the device tree binding.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015xcU1TUoi3P8rtmwjuUPqK
+---
+ drivers/gpu/drm/imagination/pvr_device.c | 14 +++++++++++++
+ drivers/gpu/drm/imagination/pvr_device.h | 26 ++++++++++++++++++++----
+ drivers/gpu/drm/imagination/pvr_power.c  | 22 +++++++++++++++++---
+ 3 files changed, 55 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index 54fe4180c7..7de6bd360d 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -100,6 +100,8 @@ static int pvr_device_clk_init(struct pvr_device *pvr_dev)
+ 	struct clk *core_clk;
+ 	struct clk *sys_clk;
+ 	struct clk *mem_clk;
++	struct clk *apb_clk;
++	struct clk *rtc_clk;
+ 
+ 	core_clk = devm_clk_get(drm_dev->dev, "core");
+ 	if (IS_ERR(core_clk))
+@@ -116,9 +118,21 @@ static int pvr_device_clk_init(struct pvr_device *pvr_dev)
+ 		return dev_err_probe(drm_dev->dev, PTR_ERR(mem_clk),
+ 				     "failed to get mem clock\n");
+ 
++	apb_clk = devm_clk_get_optional(drm_dev->dev, "apb");
++	if (IS_ERR(apb_clk))
++		return dev_err_probe(drm_dev->dev, PTR_ERR(apb_clk),
++				     "failed to get apb clock\n");
++
++	rtc_clk = devm_clk_get_optional(drm_dev->dev, "rtc");
++	if (IS_ERR(rtc_clk))
++		return dev_err_probe(drm_dev->dev, PTR_ERR(rtc_clk),
++				     "failed to get rtc clock\n");
++
+ 	pvr_dev->core_clk = core_clk;
+ 	pvr_dev->sys_clk = sys_clk;
+ 	pvr_dev->mem_clk = mem_clk;
++	pvr_dev->apb_clk = apb_clk;
++	pvr_dev->rtc_clk = rtc_clk;
+ 
+ 	return 0;
+ }
+diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
+index d51c57cf93..b51cfcccba 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.h
++++ b/drivers/gpu/drm/imagination/pvr_device.h
+@@ -148,6 +148,23 @@ struct pvr_device {
+ 	 */
+ 	struct clk *mem_clk;
+ 
++	/**
++	 * @apb_clk: Optional register interface (APB) clock.
++	 *
++	 * Some SoCs, such as the StarFive JH7110, gate the GPU's register bus
++	 * separately. If present, this needs to be enabled before the GPU is
++	 * taken out of reset and disabled after it is put back into reset.
++	 */
++	struct clk *apb_clk;
++
++	/**
++	 * @rtc_clk: Optional real-time reference clock.
++	 *
++	 * Reference clock for the GPU's internal timers on some SoCs, such as
++	 * the StarFive JH7110. Handled like @apb_clk.
++	 */
++	struct clk *rtc_clk;
++
+ 	/**
+ 	 * @power: Optional power domain devices.
+ 	 *
+@@ -162,11 +179,12 @@ struct pvr_device {
+ 	} power;
+ 
+ 	/**
+-	 * @reset: Optional reset line.
++	 * @reset: Optional reset lines.
+ 	 *
+-	 * This may be used on some platforms to provide a reset line that needs to be de-asserted
+-	 * after power-up procedure. It would also need to be asserted after the power-down
+-	 * procedure.
++	 * This may be used on some platforms to provide one or more reset lines that need to be
++	 * de-asserted after the power-up procedure. They would also need to be asserted after the
++	 * power-down procedure. Multiple lines are handled as an array and released in the order
++	 * listed in the device tree.
+ 	 */
+ 	struct reset_control *reset;
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_power.c b/drivers/gpu/drm/imagination/pvr_power.c
+index eb4b6ecdf4..ec727647fa 100644
+--- a/drivers/gpu/drm/imagination/pvr_power.c
++++ b/drivers/gpu/drm/imagination/pvr_power.c
+@@ -259,10 +259,10 @@ static int pvr_power_init_manual(struct pvr_device *pvr_dev)
+ 	struct drm_device *drm_dev = from_pvr_device(pvr_dev);
+ 	struct reset_control *reset;
+ 
+-	reset = devm_reset_control_get_optional_exclusive(drm_dev->dev, NULL);
++	reset = devm_reset_control_array_get_optional_exclusive(drm_dev->dev);
+ 	if (IS_ERR(reset))
+ 		return dev_err_probe(drm_dev->dev, PTR_ERR(reset),
+-				     "failed to get gpu reset line\n");
++				     "failed to get gpu reset lines\n");
+ 
+ 	pvr_dev->reset = reset;
+ 
+@@ -285,6 +285,14 @@ static int pvr_power_on_sequence_manual(struct pvr_device *pvr_dev)
+ 	if (err)
+ 		goto err_sys_clk_disable;
+ 
++	err = clk_prepare_enable(pvr_dev->apb_clk);
++	if (err)
++		goto err_mem_clk_disable;
++
++	err = clk_prepare_enable(pvr_dev->rtc_clk);
++	if (err)
++		goto err_apb_clk_disable;
++
+ 	/*
+ 	 * According to the hardware manual, a delay of at least 32 clock
+ 	 * cycles is required between de-asserting the clkgen reset and
+@@ -297,10 +305,16 @@ static int pvr_power_on_sequence_manual(struct pvr_device *pvr_dev)
+ 
+ 	err = reset_control_deassert(pvr_dev->reset);
+ 	if (err)
+-		goto err_mem_clk_disable;
++		goto err_rtc_clk_disable;
+ 
+ 	return 0;
+ 
++err_rtc_clk_disable:
++	clk_disable_unprepare(pvr_dev->rtc_clk);
++
++err_apb_clk_disable:
++	clk_disable_unprepare(pvr_dev->apb_clk);
++
+ err_mem_clk_disable:
+ 	clk_disable_unprepare(pvr_dev->mem_clk);
+ 
+@@ -319,6 +333,8 @@ static int pvr_power_off_sequence_manual(struct pvr_device *pvr_dev)
+ 
+ 	err = reset_control_assert(pvr_dev->reset);
+ 
++	clk_disable_unprepare(pvr_dev->rtc_clk);
++	clk_disable_unprepare(pvr_dev->apb_clk);
+ 	clk_disable_unprepare(pvr_dev->mem_clk);
+ 	clk_disable_unprepare(pvr_dev->sys_clk);
+ 	clk_disable_unprepare(pvr_dev->core_clk);

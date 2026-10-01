@@ -1,0 +1,20 @@
+diff --git sys/arch/riscv64/riscv64/pmap.c sys/arch/riscv64/riscv64/pmap.c
+index 3ddeea5..a7cb2e7 100644
+--- sys/arch/riscv64/riscv64/pmap.c
++++ sys/arch/riscv64/riscv64/pmap.c
+@@ -1585,6 +1585,15 @@ pmap_init(void)
+ 		pmap_cached_end = 0x087fffffffULL;
+ 		pmap_uncached_start = 0x1000000000ULL;
+ 		pmap_uncached_end = 0x17ffffffffULL;
++	} else if (fdt_is_compatible(node, "starfive,jh7110")) {
++		/*
++		 * The U74 cores lack Svpbmt, but DRAM is aliased
++		 * uncached (through the L2's system port) at +16GB.
++		 */
++		pmap_cached_start = 0x0040000000ULL;
++		pmap_cached_end = 0x023fffffffULL;
++		pmap_uncached_start = 0x0440000000ULL;
++		pmap_uncached_end = 0x063fffffffULL;
+ 	}
+ 
+ 	/* Clear DMAP PTEs. */

@@ -1,0 +1,80 @@
+From 033c96555bcdf5a960082425c0f636e17afcd131 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:09 +0200
+Subject: [PATCH 12/41] drm/bridge: inno-hdmi: Make the PHY configuration table
+ optional
+
+The pre-emphasis and drive-strength values in inno_hdmi_phy_config, and
+the registers they are written to, belong to the PHY integrated into the
+controller. A platform whose PHY is a separate device has neither, and
+its own .mode_valid already validates the pixel clock against the real
+PHY, so the table only bounds the generic check.
+
+Let such a platform omit the table: skip the integrated-PHY register
+writes in the power-up path and the table lookup in .mode_valid when it
+is absent. Platforms that supply one are unaffected.
+
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ drivers/gpu/drm/bridge/inno-hdmi.c | 19 ++++++++++---------
+ 1 file changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/inno-hdmi.c b/drivers/gpu/drm/bridge/inno-hdmi.c
+index 10cfdaa289..56f7d41cda 100644
+--- a/drivers/gpu/drm/bridge/inno-hdmi.c
++++ b/drivers/gpu/drm/bridge/inno-hdmi.c
+@@ -538,8 +538,14 @@ static void inno_hdmi_power_up(struct inno_hdmi *hdmi,
+ 			       unsigned long mpixelclock)
+ {
+ 	struct inno_hdmi_phy_config *phy_config;
+-	int ret = inno_hdmi_find_phy_config(hdmi, mpixelclock);
++	int ret;
++
++	inno_hdmi_sys_power(hdmi, false);
++
++	if (!hdmi->plat_data->phy_configs)
++		goto out;
+ 
++	ret = inno_hdmi_find_phy_config(hdmi, mpixelclock);
+ 	if (ret < 0) {
+ 		phy_config = hdmi->plat_data->default_phy_config;
+ 		DRM_DEV_ERROR(hdmi->dev,
+@@ -549,8 +555,6 @@ static void inno_hdmi_power_up(struct inno_hdmi *hdmi,
+ 		phy_config = &hdmi->plat_data->phy_configs[ret];
+ 	}
+ 
+-	inno_hdmi_sys_power(hdmi, false);
+-
+ 	hdmi_writeb(hdmi, HDMI_PHY_PRE_EMPHASIS, phy_config->pre_emphasis);
+ 	hdmi_writeb(hdmi, HDMI_PHY_DRIVER, phy_config->voltage_level_control);
+ 	hdmi_writeb(hdmi, HDMI_PHY_SYS_CTL, 0x15);
+@@ -560,6 +564,7 @@ static void inno_hdmi_power_up(struct inno_hdmi *hdmi,
+ 	hdmi_writeb(hdmi, HDMI_PHY_SYNC, 0x00);
+ 	hdmi_writeb(hdmi, HDMI_PHY_SYNC, 0x01);
+ 
++out:
+ 	inno_hdmi_sys_power(hdmi, true);
+ };
+ 
+@@ -836,7 +841,8 @@ static enum drm_mode_status inno_hdmi_bridge_mode_valid(struct drm_bridge *bridg
+ 	if (mpixelclk < HDMI_TMDS_CHAR_RATE_MIN_HZ)
+ 		return MODE_CLOCK_LOW;
+ 
+-	if (inno_hdmi_find_phy_config(hdmi, mpixelclk) < 0)
++	if (hdmi->plat_data->phy_configs &&
++	    inno_hdmi_find_phy_config(hdmi, mpixelclk) < 0)
+ 		return MODE_CLOCK_HIGH;
+ 
+ 	if (plat_ops && plat_ops->mode_valid) {
+@@ -1118,11 +1124,6 @@ struct inno_hdmi *inno_hdmi_probe(struct platform_device *pdev,
+ 	int irq;
+ 	int ret;
+ 
+-	if (!plat_data->phy_configs || !plat_data->default_phy_config) {
+-		dev_err(dev, "Missing platform PHY ops\n");
+-		return ERR_PTR(-ENODEV);
+-	}
+-
+ 	hdmi = devm_drm_bridge_alloc(dev, struct inno_hdmi, bridge, &inno_hdmi_bridge_funcs);
+ 	if (IS_ERR(hdmi))
+ 		return ERR_CAST(hdmi);

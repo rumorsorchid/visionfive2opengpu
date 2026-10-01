@@ -1,0 +1,117 @@
+From 23f82c31fc36783a0b9835c07c29d452c4f0b7cd Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:05 +0200
+Subject: [PATCH 08/41] drm/bridge: inno-hdmi: Split probe out of bind
+
+inno_hdmi_bind() both sets up the bridge and attaches it to a DRM
+encoder. A platform whose HDMI controller is a child of a larger device
+needs the first half without the second, since it registers as its own
+platform driver and lets the DRM core bind the bridge later.
+
+Move the setup into a new exported inno_hdmi_probe(), and reduce
+inno_hdmi_bind() to a wrapper around it.
+
+No functional change intended.
+
+Reviewed-by: Joshua Peisach <jpeisach@ubuntu.com>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ drivers/gpu/drm/bridge/inno-hdmi.c | 49 ++++++++++++++++++++++++++----
+ include/drm/bridge/inno_hdmi.h     |  4 +++
+ 2 files changed, 47 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/inno-hdmi.c b/drivers/gpu/drm/bridge/inno-hdmi.c
+index d7c33b92e2..7a9f54dce2 100644
+--- a/drivers/gpu/drm/bridge/inno-hdmi.c
++++ b/drivers/gpu/drm/bridge/inno-hdmi.c
+@@ -929,7 +929,14 @@ static irqreturn_t inno_hdmi_irq(int irq, void *dev_id)
+ {
+ 	struct inno_hdmi *hdmi = dev_id;
+ 
+-	drm_helper_hpd_irq_event(hdmi->bridge.dev);
++	/*
++	 * The interrupt is requested in probe, but bridge.dev is only set once
++	 * the DRM master binds and attaches the bridge, which may never happen.
++	 * Drop hotplug events that arrive before then rather than dereference a
++	 * NULL drm_device.
++	 */
++	if (hdmi->bridge.dev)
++		drm_helper_hpd_irq_event(hdmi->bridge.dev);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -1061,11 +1068,24 @@ static struct i2c_adapter *inno_hdmi_i2c_adapter(struct inno_hdmi *hdmi)
+ 	return adap;
+ }
+ 
+-struct inno_hdmi *inno_hdmi_bind(struct device *dev,
+-				 struct drm_encoder *encoder,
+-				 const struct inno_hdmi_plat_data *plat_data)
++/**
++ * inno_hdmi_probe - Internal helper to perform common setup
++ * @pdev: platform device
++ * @plat_data: SoC-specific platform data
++ *
++ * This function handles all the common hardware setup: allocating the main
++ * struct, mapping registers, getting clocks, initializing the hardware,
++ * setting up the IRQ, and initializing the DDC adapter and bridge struct.
++ * It returns a pointer to the inno_hdmi struct on success, or an ERR_PTR
++ * on failure.
++ *
++ * This function is used by modern, decoupled MFD/glue drivers. It registers
++ * the bridge but does not attach it.
++ */
++struct inno_hdmi *inno_hdmi_probe(struct platform_device *pdev,
++				  const struct inno_hdmi_plat_data *plat_data)
+ {
+-	struct platform_device *pdev = to_platform_device(dev);
++	struct device *dev = &pdev->dev;
+ 	struct inno_hdmi *hdmi;
+ 	int irq;
+ 	int ret;
+@@ -1128,7 +1148,24 @@ struct inno_hdmi *inno_hdmi_bind(struct device *dev,
+ 	if (ret)
+ 		return ERR_PTR(ret);
+ 
+-	ret = drm_bridge_attach(encoder, &hdmi->bridge, NULL, DRM_BRIDGE_ATTACH_NO_CONNECTOR);
++	return hdmi;
++}
++EXPORT_SYMBOL_GPL(inno_hdmi_probe);
++
++struct inno_hdmi *inno_hdmi_bind(struct device *dev,
++				 struct drm_encoder *encoder,
++				 const struct inno_hdmi_plat_data *plat_data)
++{
++	struct platform_device *pdev = to_platform_device(dev);
++	struct inno_hdmi *hdmi;
++	int ret;
++
++	hdmi = inno_hdmi_probe(pdev, plat_data);
++	if (IS_ERR(hdmi))
++		return hdmi;
++
++	ret = drm_bridge_attach(encoder, &hdmi->bridge, NULL,
++				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+ 	if (ret)
+ 		return ERR_PTR(ret);
+ 
+diff --git a/include/drm/bridge/inno_hdmi.h b/include/drm/bridge/inno_hdmi.h
+index 5bbcaeea94..81da9d9bcd 100644
+--- a/include/drm/bridge/inno_hdmi.h
++++ b/include/drm/bridge/inno_hdmi.h
+@@ -12,6 +12,7 @@ struct device;
+ struct drm_encoder;
+ struct drm_display_mode;
+ struct inno_hdmi;
++struct platform_device;
+ 
+ struct inno_hdmi_plat_ops {
+ 	void (*enable)(struct device *pdev, struct drm_display_mode *mode);
+@@ -32,4 +33,7 @@ struct inno_hdmi_plat_data {
+ struct inno_hdmi *inno_hdmi_bind(struct device *pdev,
+ 				 struct drm_encoder *encoder,
+ 				 const struct inno_hdmi_plat_data *plat_data);
++
++struct inno_hdmi *inno_hdmi_probe(struct platform_device *pdev,
++				  const struct inno_hdmi_plat_data *plat_data);
+ #endif /* __INNO_HDMI__ */

@@ -1,0 +1,24 @@
+From e91fdebf7ca1ae14a3eaff2b7e632c03abb72a28 Mon Sep 17 00:00:00 2001
+From: Dominique Belhachemi <db@domibel.de>
+Date: Sat, 2 May 2026 22:23:10 -0400
+Subject: [PATCH 33/41] drm/imagination: surface silent FW hard resets in dmesg
+
+---
+ drivers/gpu/drm/imagination/pvr_fw.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_fw.c b/drivers/gpu/drm/imagination/pvr_fw.c
+index 850a3ec8e7..f8c73241bb 100644
+--- a/drivers/gpu/drm/imagination/pvr_fw.c
++++ b/drivers/gpu/drm/imagination/pvr_fw.c
+@@ -1486,6 +1486,10 @@ pvr_fw_hard_reset(struct pvr_device *pvr_dev)
+ 	struct list_head *pos;
+ 	int err;
+ 
++	drm_warn(from_pvr_device(pvr_dev),
++		 "FW hard reset (called from %pS)\n",
++		 __builtin_return_address(0));
++
+ 	/* Reset all FW objects */
+ 	mutex_lock(&pvr_dev->fw_dev.fw_objs.lock);
+ 

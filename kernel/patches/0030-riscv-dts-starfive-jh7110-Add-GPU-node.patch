@@ -1,0 +1,50 @@
+From 67983cbb2fb06e30184fc6b3faf28525ec7173c3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 17:08:53 +0000
+Subject: [PATCH 30/41] riscv: dts: starfive: jh7110: Add GPU node
+
+Describe the Imagination BXE-4-32 MC1 GPU of the JH7110.
+
+"core" refers to the GPU_CORE_CLK gate rather than the GPU_CORE divider
+feeding it, so that enabling the core clock ungates it while clk_get_rate()
+still reports the divider output the firmware must be told about. The
+second register window present in the vendor device tree is not used by
+any driver and is dropped.
+
+Based on "riscv: dts: starfive: add PowerVR BXE-4-32 GPU node to
+jh7110.dtsi" by Dominique Belhachemi, adjusted to the binding.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015xcU1TUoi3P8rtmwjuUPqK
+---
+ arch/riscv/boot/dts/starfive/jh7110.dtsi | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/starfive/jh7110.dtsi b/arch/riscv/boot/dts/starfive/jh7110.dtsi
+index bc24709635..0c804f2fbc 100644
+--- a/arch/riscv/boot/dts/starfive/jh7110.dtsi
++++ b/arch/riscv/boot/dts/starfive/jh7110.dtsi
+@@ -1144,6 +1144,23 @@ pwrc: power-controller@17030000 {
+ 			#power-domain-cells = <1>;
+ 		};
+ 
++		gpu: gpu@18000000 {
++			compatible = "starfive,jh7110-gpu", "img,img-bxe-4-32",
++				     "img,img-rogue";
++			reg = <0x0 0x18000000 0x0 0x100000>;
++			clocks = <&syscrg JH7110_SYSCLK_GPU_CORE_CLK>,
++				 <&syscrg JH7110_SYSCLK_NOC_BUS_GPU_AXI>,
++				 <&syscrg JH7110_SYSCLK_GPU_SYS_CLK>,
++				 <&syscrg JH7110_SYSCLK_GPU_APB>,
++				 <&syscrg JH7110_SYSCLK_GPU_RTC_TOGGLE>;
++			clock-names = "core", "mem", "sys", "apb", "rtc";
++			resets = <&syscrg JH7110_SYSRST_GPU_APB>,
++				 <&syscrg JH7110_SYSRST_GPU_DOMA>;
++			interrupts = <82>;
++			power-domains = <&pwrc JH7110_PD_GPUA>;
++			dma-noncoherent;
++		};
++
+ 		csi2rx: csi@19800000 {
+ 			compatible = "starfive,jh7110-csi2rx", "cdns,csi2rx";
+ 			reg = <0x0 0x19800000 0x0 0x10000>;

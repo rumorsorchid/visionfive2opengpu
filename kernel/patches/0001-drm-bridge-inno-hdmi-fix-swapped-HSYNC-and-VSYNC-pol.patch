@@ -1,0 +1,37 @@
+From abbe701c7f994f626b0833a89ddcc20ab916e003 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:30:58 +0200
+Subject: [PATCH 01/41] drm/bridge: inno-hdmi: fix swapped HSYNC and VSYNC
+ polarity
+
+v_HSYNC_POLARITY() and v_VSYNC_POLARITY() write the wrong bits: the
+hardware puts HSYNC in bit 2 and VSYNC in bit 3, the macros do the
+opposite. Most CEA modes drive both syncs with the same polarity so it
+goes unnoticed; it only shows up on modes where the two differ.
+
+Fixes: 412d4ae6b7a5 ("drm/rockchip: hdmi: add Innosilicon HDMI support")
+Reported-by: Maud Spierings <maud_spierings@murena.io>
+Closes: https://lore.kernel.org/all/e780ecb8-918f-4816-99c8-b69b10b25a18@murena.io/
+Reported-by: Byron Stanoszek <gandalf@winds.org>
+Closes: https://lore.kernel.org/all/b8b046ee-c574-3e16-6079-2fc415633dae@winds.org/
+Suggested-by: Dominique Belhachemi <db@domibel.de>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ drivers/gpu/drm/bridge/inno-hdmi.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/inno-hdmi.c b/drivers/gpu/drm/bridge/inno-hdmi.c
+index dd35f5a875..d7c33b92e2 100644
+--- a/drivers/gpu/drm/bridge/inno-hdmi.c
++++ b/drivers/gpu/drm/bridge/inno-hdmi.c
+@@ -122,8 +122,8 @@ enum {
+ #define v_VIDEO_MUTE(n)			((n) << 0)
+ 
+ #define HDMI_VIDEO_TIMING_CTL		0x08
+-#define v_HSYNC_POLARITY(n)		((n) << 3)
+-#define v_VSYNC_POLARITY(n)		((n) << 2)
++#define v_VSYNC_POLARITY(n)		((n) << 3)
++#define v_HSYNC_POLARITY(n)		((n) << 2)
+ #define v_INETLACE(n)			((n) << 1)
+ #define v_EXTERANL_VIDEO(n)		((n) << 0)
+ 

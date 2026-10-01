@@ -1,0 +1,234 @@
+From 49d45568909da85789fd4e31bcd88a8419f724fe Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 17:09:34 +0000
+Subject: [PATCH 40/41] drm/imagination: Use the BXE-4-32 firmware's
+ POWER_EVENT sequence
+
+The JH7110's BXE-4-32 comes out of reset with its rascal/dust power island
+gated. The previous patch ungates it from the host with a single
+POWER_EVENT write whose value was partly guessed.
+
+POWER_EVENT is not in the Rogue DDK register definitions, but the
+BXE-4-32 firmware contains its own power-event routine (0xc000a690 in
+rogue_36.50.54.182_v1.fw v1.0 build 6503725), which settles the unknowns:
+
+ - bits 31:24 are a GPU mask computed as (1 << MULTICORE_SYSTEM) - 1, i.e.
+   0x01 on this single-core GPU rather than 0xff;
+ - bit 10 is a third power domain requested together with
+   DOMAIN_CLUSTER0 (bit 8) and DOMAIN_SPU0 (bit 9);
+ - the firmware sets XPU_BROADCAST, writes the event without REQ_EN,
+   waits one ROGUE_CR_TIMER tick and then sets REQ_EN;
+ - on completion it clears POWER_EVENT and acknowledges both
+   POWER_COMPLETE and POWER_ABORT.
+
+Do the same, and turn the module parameter into a selector so the result
+can be compared on hardware: 0 = no host power-up, 1 = firmware sequence
+(default), 2 = the original single-write value.
+
+The deeper difference to StarFive's DDK is that the DDK passes
+ROGUE_FWIF_INICFG_POW_RASCALDUST to the firmware (bEnableRDPowIsland in
+its JH7110 system layer), letting the firmware manage the island, whereas
+the upstream driver never sets it and the firmware assumes the island is
+powered. Add an rd_power_island parameter (default off) that sets the flag,
+so that jh7110_power_event=0 rd_power_island=1 can be tested as a host-
+side-free alternative.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015xcU1TUoi3P8rtmwjuUPqK
+---
+ drivers/gpu/drm/imagination/pvr_fw.c          |  15 +++
+ .../gpu/drm/imagination/pvr_fw_startstop.c    | 115 ++++++++++++++----
+ 2 files changed, 108 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_fw.c b/drivers/gpu/drm/imagination/pvr_fw.c
+index f8c73241bb..eec4afe2b1 100644
+--- a/drivers/gpu/drm/imagination/pvr_fw.c
++++ b/drivers/gpu/drm/imagination/pvr_fw.c
+@@ -22,6 +22,7 @@
+ #include <linux/firmware.h>
+ #include <linux/math.h>
+ #include <linux/minmax.h>
++#include <linux/module.h>
+ #include <linux/sizes.h>
+ 
+ #define FW_MAX_SUPPORTED_MAJOR_VERSION 1
+@@ -408,6 +409,17 @@ fw_sysinit_init(void *cpu_ptr, void *priv)
+ 
+ #define ROGUE_FWIF_SLC_MIN_SIZE_FOR_DM_OVERLAP_KB 4
+ 
++/*
++ * StarFive's DDK enables the rascal/dust power island on the JH7110
++ * (bEnableRDPowIsland), which makes it pass ROGUE_FWIF_INICFG_POW_RASCALDUST
++ * to the firmware so that the firmware powers the shader cluster up and down
++ * itself. The upstream driver has never set it.
++ */
++static bool pvr_rd_power_island;
++module_param_named(rd_power_island, pvr_rd_power_island, bool, 0400);
++MODULE_PARM_DESC(rd_power_island,
++		 "Let the firmware manage the rascal/dust power island (ROGUE_FWIF_INICFG_POW_RASCALDUST, default: false)");
++
+ static void
+ fw_sysdata_init(void *cpu_ptr, void *priv)
+ {
+@@ -421,6 +433,9 @@ fw_sysdata_init(void *cpu_ptr, void *priv)
+ 	if (slc_size_in_kilobytes < ROGUE_FWIF_SLC_MIN_SIZE_FOR_DM_OVERLAP_KB)
+ 		config_flags |= ROGUE_FWIF_INICFG_DISABLE_DM_OVERLAP;
+ 
++	if (pvr_rd_power_island)
++		config_flags |= ROGUE_FWIF_INICFG_POW_RASCALDUST;
++
+ 	fwif_sysdata->config_flags = config_flags;
+ }
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_fw_startstop.c b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+index 9bdf1c4fee..9d0b22ceeb 100644
+--- a/drivers/gpu/drm/imagination/pvr_fw_startstop.c
++++ b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+@@ -9,9 +9,14 @@
+ #include "pvr_rogue_meta.h"
+ #include "pvr_vm.h"
+ 
++#include <drm/drm_print.h>
++
++#include <linux/bits.h>
+ #include <linux/compiler.h>
+ #include <linux/delay.h>
+ #include <linux/ktime.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
+ #include <linux/types.h>
+ 
+ #define POLL_TIMEOUT_USEC 1000000
+@@ -93,13 +98,91 @@ rogue_slc_init(struct pvr_device *pvr_dev)
+ 	return 0;
+ }
+ 
+-#define RGX_CR_POWER_EVENT 0x0038U
+-#define RGX_CR_POWER_EVENT_REQ_EN 0x00000002U
+-#define RGX_CR_POWER_EVENT_DOMAIN_CLUSTER0_SHIFT 8U
+-#define RGX_CR_POWER_EVENT_DOMAIN_SPU0_SHIFT 9U
+-#define GUESS_TYPE_POWER_UP 0x1U
+-#define GUESS_BIT10_SHIFT 10U
+-#define GUESS_MULTICORE_MASK 0xff000000U
++/*
++ * POWER_EVENT is not part of the Rogue register definitions shipped with
++ * Imagination's DDK. The Volcanic DDK documents TYPE (bit 0, 0 = power
++ * down), REQ_EN (bit 1), DOMAIN_CLUSTER0 (bit 8) and DOMAIN_SPU0 (bit 9).
++ * The rest is taken from the BXE-4-32 firmware's own power-event routine
++ * (rogue_36.50.54.182_v1.fw, v1.0 build 6503725, code at 0xc000a690):
++ *
++ *  - bits 31:24 hold a mask of the GPUs to act on, built as
++ *    (1 << MULTICORE_SYSTEM) - 1;
++ *  - the firmware requests domains 8, 9 and 10 together;
++ *  - XPU_BROADCAST is set to 1 first, the event is written without
++ *    REQ_EN, and REQ_EN is added after one ROGUE_CR_TIMER tick;
++ *  - on completion POWER_EVENT is cleared and both POWER_COMPLETE and
++ *    POWER_ABORT are acknowledged.
++ *
++ * The JH7110 comes out of reset with this rascal/dust island gated, but
++ * the upstream driver never sets ROGUE_FWIF_INICFG_POW_RASCALDUST, so the
++ * firmware assumes it is powered. jh7110_power_event selects how the host
++ * brings it up before booting the firmware:
++ *
++ *   0  not at all (use with rd_power_island=1, or to reproduce the hang)
++ *   1  the firmware's sequence (default)
++ *   2  the single-write value used by the original community patch
++ */
++#define ROGUE_CR_POWER_EVENT 0x0038U
++#define ROGUE_CR_POWER_EVENT_TYPE_POWER_UP 0x00000001U
++#define ROGUE_CR_POWER_EVENT_REQ_EN 0x00000002U
++#define ROGUE_CR_POWER_EVENT_DOMAIN_CLUSTER0_EN BIT(8)
++#define ROGUE_CR_POWER_EVENT_DOMAIN_SPU0_EN BIT(9)
++#define ROGUE_CR_POWER_EVENT_DOMAIN_10_EN BIT(10)
++#define ROGUE_CR_POWER_EVENT_GPU_MASK_SHIFT 24U
++#define ROGUE_CR_MULTICORE_SYSTEM 0xF308U
++#define ROGUE_CR_MULTICORE_SYSTEM_GPU_COUNT_MASK 0xFU
++
++#define PVR_JH7110_POWER_EVENT_LEGACY 0xff000703U
++
++static int pvr_jh7110_power_event = 1;
++module_param_named(jh7110_power_event, pvr_jh7110_power_event, int, 0600);
++MODULE_PARM_DESC(jh7110_power_event,
++		 "BXE-4-32: host rascal/dust power-up before FW boot: 0 = none, 1 = firmware's sequence (default), 2 = legacy single write");
++
++static int
++pvr_bxe_4_32_power_up_rascal_dust(struct pvr_device *pvr_dev)
++{
++	u32 gpu_count, val;
++	int err;
++
++	if (pvr_jh7110_power_event == 2) {
++		pvr_cr_write32(pvr_dev, ROGUE_CR_POWER_EVENT, PVR_JH7110_POWER_EVENT_LEGACY);
++	} else {
++		gpu_count = pvr_cr_read32(pvr_dev, ROGUE_CR_MULTICORE_SYSTEM) &
++			    ROGUE_CR_MULTICORE_SYSTEM_GPU_COUNT_MASK;
++		gpu_count = clamp(gpu_count, 1U, 8U);
++
++		val = (GENMASK(gpu_count - 1, 0) << ROGUE_CR_POWER_EVENT_GPU_MASK_SHIFT) |
++		      ROGUE_CR_POWER_EVENT_DOMAIN_10_EN |
++		      ROGUE_CR_POWER_EVENT_DOMAIN_SPU0_EN |
++		      ROGUE_CR_POWER_EVENT_DOMAIN_CLUSTER0_EN |
++		      ROGUE_CR_POWER_EVENT_TYPE_POWER_UP;
++
++		pvr_cr_write32(pvr_dev, ROGUE_CR_XPU_BROADCAST, 1);
++		(void)pvr_cr_read32(pvr_dev, ROGUE_CR_XPU_BROADCAST);
++		pvr_cr_write32(pvr_dev, ROGUE_CR_POWER_EVENT, val);
++		udelay(1);
++		pvr_cr_write32(pvr_dev, ROGUE_CR_POWER_EVENT, val | ROGUE_CR_POWER_EVENT_REQ_EN);
++	}
++
++	err = pvr_cr_poll_reg32(pvr_dev, ROGUE_CR_EVENT_STATUS,
++				ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
++				ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
++				POLL_TIMEOUT_USEC);
++	if (err) {
++		drm_err(from_pvr_device(pvr_dev),
++			"rascal/dust power-up via POWER_EVENT timed out (EVENT_STATUS=0x%08x)\n",
++			pvr_cr_read32(pvr_dev, ROGUE_CR_EVENT_STATUS));
++		return err;
++	}
++
++	pvr_cr_write32(pvr_dev, ROGUE_CR_POWER_EVENT, 0);
++	pvr_cr_write32(pvr_dev, ROGUE_CR_EVENT_CLEAR,
++		       ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN |
++		       ROGUE_CR_EVENT_STATUS_POWER_ABORT_EN);
++
++	return 0;
++}
+ 
+ /**
+  * pvr_fw_start() - Start FW processor and boot firmware
+@@ -114,7 +197,6 @@ pvr_fw_start(struct pvr_device *pvr_dev)
+ {
+ 	bool has_reset2 = PVR_HAS_FEATURE(pvr_dev, xe_tpu2);
+ 	u64 soft_reset_mask;
+-	u32 power_event_val;
+ 	int err;
+ 
+ 	if (PVR_HAS_FEATURE(pvr_dev, pbe2_in_xe))
+@@ -144,22 +226,11 @@ pvr_fw_start(struct pvr_device *pvr_dev)
+ 	if (has_reset2)
+ 		(void)pvr_cr_read64(pvr_dev, ROGUE_CR_SOFT_RESET2);
+ 
+-	if (pvr_gpu_id_to_packed_bvnc(&pvr_dev->gpu_id) == PVR_PACKED_BVNC(36, 50, 54, 182)) {
+-		power_event_val = GUESS_MULTICORE_MASK |
+-				  (1U << GUESS_BIT10_SHIFT) |
+-				  (1U << RGX_CR_POWER_EVENT_DOMAIN_SPU0_SHIFT) |
+-				  (1U << RGX_CR_POWER_EVENT_DOMAIN_CLUSTER0_SHIFT) |
+-				  RGX_CR_POWER_EVENT_REQ_EN |
+-				  GUESS_TYPE_POWER_UP;
+-		pvr_cr_write32(pvr_dev, RGX_CR_POWER_EVENT, power_event_val);
+-		err = pvr_cr_poll_reg32(pvr_dev, ROGUE_CR_EVENT_STATUS,
+-					ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
+-					ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
+-					POLL_TIMEOUT_USEC);
++	if (pvr_jh7110_power_event > 0 &&
++	    pvr_gpu_id_to_packed_bvnc(&pvr_dev->gpu_id) == PVR_PACKED_BVNC(36, 50, 54, 182)) {
++		err = pvr_bxe_4_32_power_up_rascal_dust(pvr_dev);
+ 		if (err)
+ 			goto err_reset;
+-		pvr_cr_write32(pvr_dev, RGX_CR_POWER_EVENT, 0);
+-		pvr_cr_write32(pvr_dev, ROGUE_CR_EVENT_CLEAR, ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN);
+ 	}
+ 
+ 	/* Take Rascal and Dust out of reset. */

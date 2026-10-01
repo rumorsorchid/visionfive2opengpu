@@ -1,0 +1,30 @@
+From 2b06be60bfa0be8f8f3945419ff318a901bb7351 Mon Sep 17 00:00:00 2001
+From: Dominique Belhachemi <db@domibel.de>
+Date: Sat, 2 May 2026 22:21:07 -0400
+Subject: [PATCH 36/41] drm/imagination: fix wrong vm_bo passed to
+ drm_gpuva_link in remap
+
+---
+ drivers/gpu/drm/imagination/pvr_vm.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 55cc999f37..8584eb0fae 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -434,13 +434,13 @@ pvr_vm_gpuva_remap(struct drm_gpuva_op *op, void *op_ctx)
+ 
+ 	if (op->remap.prev) {
+ 		pvr_gem_object_get(gem_to_pvr_gem(ctx->prev_va->base.gem.obj));
+-		drm_gpuva_link(&ctx->prev_va->base, ctx->gpuvm_bo);
++		drm_gpuva_link(&ctx->prev_va->base, op->remap.unmap->va->vm_bo);
+ 		ctx->prev_va = NULL;
+ 	}
+ 
+ 	if (op->remap.next) {
+ 		pvr_gem_object_get(gem_to_pvr_gem(ctx->next_va->base.gem.obj));
+-		drm_gpuva_link(&ctx->next_va->base, ctx->gpuvm_bo);
++		drm_gpuva_link(&ctx->next_va->base, op->remap.unmap->va->vm_bo);
+ 		ctx->next_va = NULL;
+ 	}
+ 

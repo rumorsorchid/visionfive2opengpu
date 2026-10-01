@@ -1,0 +1,38 @@
+From 18ae974bd4793d1b88d9600f137fab49e23ee470 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 17:08:41 +0000
+Subject: [PATCH 29/41] drm/imagination: Add BXE-4-32 (36.50.54.182) as
+ experimental
+
+The BXE-4-32 MC1 found in the StarFive JH7110 is a single-cluster Rogue XE
+core using a MIPS firmware processor. Imagination's device tables differ
+from the already supported BXM-4-64 (36.52.104.182, TH1520) only in the
+number of ISP IPP pipes (4 vs 6); the BRN/ERN set in the DDK hardware
+definitions is identical, and the open-source firmware image
+rogue_36.50.54.182_v1.fw carries matching device information.
+
+Vulkan via Mesa's PowerVR driver (and OpenGL via Zink) has been exercised
+on the VisionFive 2, but the core is not yet conformance tested, so list it
+as experimental: loading the driver requires exp_hw_support=1, instead of
+patching out the support check entirely.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015xcU1TUoi3P8rtmwjuUPqK
+---
+ drivers/gpu/drm/imagination/pvr_device.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index 7de6bd360d..b66a01e17a 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -549,6 +549,9 @@ pvr_gpu_support_level(const struct pvr_gpu_id *gpu_id)
+ 	case PVR_PACKED_BVNC(36, 53, 104, 796):
+ 		return PVR_GPU_SUPPORTED;
+ 
++	case PVR_PACKED_BVNC(36, 50, 54, 182):
++		return PVR_GPU_EXPERIMENTAL;
++
+ 	default:
+ 		return PVR_GPU_UNKNOWN;
+ 	}

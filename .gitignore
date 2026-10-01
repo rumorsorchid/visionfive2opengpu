@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+/linux/
+/build/
+*.log
+vf2-gpu-report-*.txt
+bench-*.txt

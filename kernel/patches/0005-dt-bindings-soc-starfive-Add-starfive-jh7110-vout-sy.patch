@@ -1,0 +1,29 @@
+From 477d03d04a532e031ee5f7130ce2daa5346e1c50 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:02 +0200
+Subject: [PATCH 05/41] dt-bindings: soc: starfive: Add
+ starfive,jh7110-vout-syscon
+
+The video output subsystem has its own system controller, documented as
+dom_vout_syscon. Among other things it holds the mux that selects which
+DC8200 output drives the HDMI transmitter, so the HDMI controller needs
+to reach it.
+
+Acked-by: Krzysztof Kozlowski <krzysztof.kozlowski@oss.qualcomm.com>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ .../devicetree/bindings/soc/starfive/starfive,jh7110-syscon.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-syscon.yaml b/Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-syscon.yaml
+index 0039319e91..cf9b657d0e 100644
+--- a/Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-syscon.yaml
++++ b/Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-syscon.yaml
+@@ -24,6 +24,7 @@ properties:
+           - enum:
+               - starfive,jh7110-aon-syscon
+               - starfive,jh7110-stg-syscon
++              - starfive,jh7110-vout-syscon
+           - const: syscon
+ 
+   reg:

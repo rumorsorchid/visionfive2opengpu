@@ -1,0 +1,56 @@
+From 75029c2148ff2ea40e8d728be8c06f18da644529 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:10 +0200
+Subject: [PATCH 13/41] drm/bridge: inno-hdmi: Make the register clock source
+ selectable
+
+inno_hdmi_init_hw() drives the register interface from the system clock
+on every platform, by setting v_REG_CLK_SOURCE_SYS unconditionally in
+HDMI_SYS_CTRL.
+
+That is not right everywhere. On the JH7110 a Framework 13 (fml13v01)
+panel flickers continuously with the system clock selected and behaves
+once the TMDS clock drives the register interface instead. Maud Spierings
+found this by diffing HDMI_SYS_CTRL against the StarFive vendor kernel,
+which leaves the bit clear.
+
+Add a plat_data flag for it rather than changing the bit for everyone.
+The Rockchip integrations keep the system clock, so this is a no-op for
+them; only a platform that asks for it gets the TMDS clock.
+
+Reported-by: Maud Spierings <maud_spierings@murena.io>
+Closes: https://lore.kernel.org/all/e780ecb8-918f-4816-99c8-b69b10b25a18@murena.io/
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ drivers/gpu/drm/bridge/inno-hdmi.c | 4 +++-
+ include/drm/bridge/inno_hdmi.h     | 2 ++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/bridge/inno-hdmi.c b/drivers/gpu/drm/bridge/inno-hdmi.c
+index 56f7d41cda..db92013a3b 100644
+--- a/drivers/gpu/drm/bridge/inno-hdmi.c
++++ b/drivers/gpu/drm/bridge/inno-hdmi.c
+@@ -580,7 +580,9 @@ static void inno_hdmi_init_hw(struct inno_hdmi *hdmi)
+ 	usleep_range(100, 150);
+ 
+ 	msk = m_REG_CLK_INV | m_REG_CLK_SOURCE | m_POWER | m_INT_POL;
+-	val = v_REG_CLK_INV | v_REG_CLK_SOURCE_SYS | v_PWR_ON | v_INT_POL_HIGH;
++	val = v_REG_CLK_INV | v_PWR_ON | v_INT_POL_HIGH;
++	val |= hdmi->plat_data->reg_clk_source_tmds ? v_REG_CLK_SOURCE_TMDS :
++						      v_REG_CLK_SOURCE_SYS;
+ 	hdmi_modb(hdmi, HDMI_SYS_CTRL, msk, val);
+ 
+ 	inno_hdmi_standby(hdmi);
+diff --git a/include/drm/bridge/inno_hdmi.h b/include/drm/bridge/inno_hdmi.h
+index 1e9974401c..620f035eb9 100644
+--- a/include/drm/bridge/inno_hdmi.h
++++ b/include/drm/bridge/inno_hdmi.h
+@@ -32,6 +32,8 @@ struct inno_hdmi_plat_data {
+ 	const struct inno_hdmi_plat_ops *ops;
+ 	struct inno_hdmi_phy_config *phy_configs;
+ 	struct inno_hdmi_phy_config *default_phy_config;
++	/* Clock the register interface from the TMDS clock, not the system clock. */
++	bool reg_clk_source_tmds;
+ };
+ 
+ struct inno_hdmi *inno_hdmi_bind(struct device *pdev,

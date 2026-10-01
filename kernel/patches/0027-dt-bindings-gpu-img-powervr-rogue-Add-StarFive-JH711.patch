@@ -1,0 +1,146 @@
+From 8324a781da8026eb67e36e592b86e9af2e5ae977 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 17:08:01 +0000
+Subject: [PATCH 27/41] dt-bindings: gpu: img,powervr-rogue: Add StarFive
+ JH7110 GPU
+
+The StarFive JH7110 SoC (VisionFive 2, Star64, Milk-V Mars, ...) integrates
+an Imagination BXE-4-32 MC1 GPU (BVNC 36.50.54.182) with a MIPS firmware
+processor.
+
+Compared to the GPUs already described here the JH7110 integration needs:
+
+ - two additional clocks, the APB register interface clock and the RTC
+   ("toggle") reference clock used by the GPU's internal timers;
+ - two resets, the APB bus reset and the GPU core ("domain A") reset,
+   which StarFive's vendor driver releases in that order;
+ - a single SoC power domain (JH7110_PD_GPUA);
+ - dma-noncoherent, since the GPU's AXI master is not snooped by the
+   U74 cluster's L2 cache.
+
+Clocks and resets are matched by position. The existing compatibles keep
+their previous limits of three clocks and one reset.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015xcU1TUoi3P8rtmwjuUPqK
+---
+ .../bindings/gpu/img,powervr-rogue.yaml       | 74 ++++++++++++++++++-
+ 1 file changed, 72 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/gpu/img,powervr-rogue.yaml b/Documentation/devicetree/bindings/gpu/img,powervr-rogue.yaml
+index e9218e0f36..75b9715e0e 100644
+--- a/Documentation/devicetree/bindings/gpu/img,powervr-rogue.yaml
++++ b/Documentation/devicetree/bindings/gpu/img,powervr-rogue.yaml
+@@ -46,6 +46,11 @@ properties:
+               - ti,j721s2-gpu
+           - const: img,img-bxs-4-64
+           - const: img,img-rogue
++      - items:
++          - enum:
++              - starfive,jh7110-gpu
++          - const: img,img-bxe-4-32
++          - const: img,img-rogue
+ 
+       # This legacy combination of compatible strings was introduced early on
+       # before the more specific GPU identifiers were used.
+@@ -60,13 +65,15 @@ properties:
+ 
+   clocks:
+     minItems: 1
+-    maxItems: 3
++    maxItems: 5
+ 
+   clock-names:
+     items:
+       - const: core
+       - const: mem
+       - const: sys
++      - const: apb
++      - const: rtc
+     minItems: 1
+ 
+   interrupts:
+@@ -84,8 +91,11 @@ properties:
+ 
+   dma-coherent: true
+ 
++  dma-noncoherent: true
++
+   resets:
+-    maxItems: 1
++    minItems: 1
++    maxItems: 2
+ 
+ required:
+   - compatible
+@@ -110,6 +120,44 @@ allOf:
+         clocks:
+           maxItems: 1
+ 
++  - if:
++      properties:
++        compatible:
++          not:
++            contains:
++              const: starfive,jh7110-gpu
++    then:
++      properties:
++        clocks:
++          maxItems: 3
++        clock-names:
++          maxItems: 3
++        resets:
++          maxItems: 1
++
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: starfive,jh7110-gpu
++    then:
++      properties:
++        clocks:
++          minItems: 5
++        clock-names:
++          minItems: 5
++        resets:
++          items:
++            - description: GPU APB bus reset
++            - description: GPU core ("domain A") reset
++        power-domains:
++          items:
++            - description: The GPUA power domain of the JH7110 PMU
++        power-domain-names: false
++      required:
++        - resets
++        - power-domains
++
+   - if:
+       properties:
+         compatible:
+@@ -189,3 +237,25 @@ examples:
+         power-domains = <&k3_pds 187 TI_SCI_PD_EXCLUSIVE>;
+         power-domain-names = "a";
+     };
++
++  - |
++    #include <dt-bindings/clock/starfive,jh7110-crg.h>
++    #include <dt-bindings/power/starfive,jh7110-pmu.h>
++    #include <dt-bindings/reset/starfive,jh7110-crg.h>
++
++    gpu@18000000 {
++        compatible = "starfive,jh7110-gpu", "img,img-bxe-4-32",
++                     "img,img-rogue";
++        reg = <0x18000000 0x100000>;
++        clocks = <&syscrg JH7110_SYSCLK_GPU_CORE_CLK>,
++                 <&syscrg JH7110_SYSCLK_NOC_BUS_GPU_AXI>,
++                 <&syscrg JH7110_SYSCLK_GPU_SYS_CLK>,
++                 <&syscrg JH7110_SYSCLK_GPU_APB>,
++                 <&syscrg JH7110_SYSCLK_GPU_RTC_TOGGLE>;
++        clock-names = "core", "mem", "sys", "apb", "rtc";
++        resets = <&syscrg JH7110_SYSRST_GPU_APB>,
++                 <&syscrg JH7110_SYSRST_GPU_DOMA>;
++        interrupts = <82>;
++        power-domains = <&pwrc JH7110_PD_GPUA>;
++        dma-noncoherent;
++    };

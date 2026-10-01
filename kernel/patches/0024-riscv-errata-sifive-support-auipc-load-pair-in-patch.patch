@@ -1,0 +1,43 @@
+From 31ef0cf6ba93a15bba3a6738236f6840279f564e Mon Sep 17 00:00:00 2001
+From: Bo Gan <ganboing@gmail.com>
+Date: Sun, 15 Mar 2026 23:03:27 -0700
+Subject: [PATCH 24/41] riscv: errata: sifive: support auipc/load pair in
+ patched alternatives
+
+Enhance the errata/sifive patching function to support auipc/load
+insn pair by fixing the offsets in immediate, just like in function
+`riscv_cpufeature_patch_func`. Refer to commit 27c653c06505
+("RISC-V: fix auipc-jalr addresses in patched alternatives")
+
+Signed-off-by: Bo Gan <ganboing@gmail.com>
+---
+ arch/riscv/errata/sifive/errata.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/arch/riscv/errata/sifive/errata.c b/arch/riscv/errata/sifive/errata.c
+index df80c9614d..b13c401cc6 100644
+--- a/arch/riscv/errata/sifive/errata.c
++++ b/arch/riscv/errata/sifive/errata.c
+@@ -80,6 +80,7 @@ void sifive_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+ 			      unsigned int stage)
+ {
+ 	struct alt_entry *alt;
++	void *oldptr, *altptr;
+ 	u32 cpu_req_errata;
+ 	u32 tmp;
+ 
+@@ -98,9 +99,12 @@ void sifive_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+ 
+ 		tmp = (1U << alt->patch_id);
+ 		if (cpu_req_errata & tmp) {
++			oldptr = ALT_OLD_PTR(alt);
++			altptr = ALT_ALT_PTR(alt);
++
+ 			mutex_lock(&text_mutex);
+-			patch_text_nosync(ALT_OLD_PTR(alt), ALT_ALT_PTR(alt),
+-					  alt->alt_len);
++			patch_text_nosync(oldptr, altptr, alt->alt_len);
++			riscv_alternative_fix_offsets(oldptr, alt->alt_len, oldptr - altptr);
+ 			mutex_unlock(&text_mutex);
+ 		}
+ 	}

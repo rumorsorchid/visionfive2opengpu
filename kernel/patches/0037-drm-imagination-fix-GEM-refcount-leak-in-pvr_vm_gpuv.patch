@@ -1,0 +1,29 @@
+From 6275fcff0ebad73a05d4a7b8ed39f8df59603065 Mon Sep 17 00:00:00 2001
+From: Dominique Belhachemi <db@domibel.de>
+Date: Tue, 18 Aug 2026 20:07:34 +0000
+Subject: [PATCH 37/41] drm/imagination: fix GEM refcount leak in
+ pvr_vm_gpuva_remap()
+
+drm_gpuva_link() already holds the needed reference.
+---
+ drivers/gpu/drm/imagination/pvr_vm.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 8584eb0fae..8658fe0234 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -433,13 +433,11 @@ pvr_vm_gpuva_remap(struct drm_gpuva_op *op, void *op_ctx)
+ 	drm_gpuva_remap(&ctx->prev_va->base, &ctx->next_va->base, &op->remap);
+ 
+ 	if (op->remap.prev) {
+-		pvr_gem_object_get(gem_to_pvr_gem(ctx->prev_va->base.gem.obj));
+ 		drm_gpuva_link(&ctx->prev_va->base, op->remap.unmap->va->vm_bo);
+ 		ctx->prev_va = NULL;
+ 	}
+ 
+ 	if (op->remap.next) {
+-		pvr_gem_object_get(gem_to_pvr_gem(ctx->next_va->base.gem.obj));
+ 		drm_gpuva_link(&ctx->next_va->base, op->remap.unmap->va->vm_bo);
+ 		ctx->next_va = NULL;
+ 	}

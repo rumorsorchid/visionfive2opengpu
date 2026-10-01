@@ -1,0 +1,82 @@
+From 96ee09b428d1105d680a4496fea1b4bfa6919c32 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:06 +0200
+Subject: [PATCH 09/41] drm/bridge: inno-hdmi: Allow the register map to come
+ from a parent
+
+On some SoCs the HDMI controller does not own its register window. The
+StarFive JH7110 documents one 64 KB block, u0_hdmitx, that holds both
+the controller and the PHY, so the parent device maps it and owns the
+regmap while the two children share it.
+
+Use a regmap supplied by the parent device when there is one, and keep
+mapping our own resource when there is not, so platforms that own their
+register window are unaffected.
+
+Reviewed-by: Joshua Peisach <jpeisach@ubuntu.com>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ drivers/gpu/drm/bridge/inno-hdmi.c | 31 +++++++++++++++++++++++++++---
+ 1 file changed, 28 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/inno-hdmi.c b/drivers/gpu/drm/bridge/inno-hdmi.c
+index 7a9f54dce2..bf4308f986 100644
+--- a/drivers/gpu/drm/bridge/inno-hdmi.c
++++ b/drivers/gpu/drm/bridge/inno-hdmi.c
+@@ -397,6 +397,7 @@ struct inno_hdmi {
+ 	struct clk *pclk;
+ 	struct clk *refclk;
+ 	void __iomem *regs;
++	struct regmap *regmap;
+ 	struct regmap *grf;
+ 
+ 	struct inno_hdmi_i2c *i2c;
+@@ -470,11 +471,25 @@ static int inno_hdmi_find_phy_config(struct inno_hdmi *hdmi,
+ 
+ static inline u8 hdmi_readb(struct inno_hdmi *hdmi, u16 offset)
+ {
++	u32 val;
++
++	if (hdmi->regmap) {
++		if (regmap_read(hdmi->regmap, offset * 4, &val))
++			return 0;
++
++		return val;
++	}
++
+ 	return readl_relaxed(hdmi->regs + (offset) * 0x04);
+ }
+ 
+ static inline void hdmi_writeb(struct inno_hdmi *hdmi, u16 offset, u32 val)
+ {
++	if (hdmi->regmap) {
++		regmap_write(hdmi->regmap, offset * 4, val);
++		return;
++	}
++
+ 	writel_relaxed(val, hdmi->regs + (offset) * 0x04);
+ }
+ 
+@@ -1102,9 +1117,19 @@ struct inno_hdmi *inno_hdmi_probe(struct platform_device *pdev,
+ 	hdmi->dev = dev;
+ 	hdmi->plat_data = plat_data;
+ 
+-	hdmi->regs = devm_platform_ioremap_resource(pdev, 0);
+-	if (IS_ERR(hdmi->regs))
+-		return ERR_CAST(hdmi->regs);
++	/*
++	 * On platforms where the controller shares a register space with
++	 * other blocks, the parent owns the regmap. Fall back to mapping
++	 * our own resource where it does not.
++	 */
++	if (dev->parent)
++		hdmi->regmap = dev_get_regmap(dev->parent, NULL);
++
++	if (!hdmi->regmap) {
++		hdmi->regs = devm_platform_ioremap_resource(pdev, 0);
++		if (IS_ERR(hdmi->regs))
++			return ERR_CAST(hdmi->regs);
++	}
+ 
+ 	hdmi->pclk = devm_clk_get_enabled(hdmi->dev, "pclk");
+ 	if (IS_ERR(hdmi->pclk)) {

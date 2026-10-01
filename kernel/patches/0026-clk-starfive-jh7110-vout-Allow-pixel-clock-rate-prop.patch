@@ -1,0 +1,43 @@
+From 86d85924befae6b46e1b1bf9469b0e1cc065c7de Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 15 Sep 2026 17:32:22 +0200
+Subject: [PATCH 26/41] clk: starfive: jh7110-vout: Allow pixel clock rate
+ propagation
+
+The dc8200_pix0 and dc8200_pix1 MUXes feed the display controller, and
+the rate they carry is ultimately produced by the HDMI PHY, which
+registers hdmitx0_pixelclk as a clock provider.
+
+Add CLK_SET_RATE_PARENT to both MUXes so a rate requested on them
+reaches that parent, instead of being clamped to whatever rate the
+parent already happens to run at.
+
+Co-developed-by: Dominique Belhachemi <db@domibel.de>
+Signed-off-by: Dominique Belhachemi <db@domibel.de>
+Reviewed-by: Joshua Peisach <jpeisach@ubuntu.com>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+Signed-off-by: Brian Masney <masneyb@kernel.org>
+(cherry picked from commit af384d6e0573b416a7a28e0ab6300d797cae369d)
+---
+ drivers/clk/starfive/clk-starfive-jh7110-vout.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/clk/starfive/clk-starfive-jh7110-vout.c b/drivers/clk/starfive/clk-starfive-jh7110-vout.c
+index bad20d5d79..aeba42cd3c 100644
+--- a/drivers/clk/starfive/clk-starfive-jh7110-vout.c
++++ b/drivers/clk/starfive/clk-starfive-jh7110-vout.c
+@@ -40,10 +40,12 @@ static const struct jh71x0_clk_data jh7110_voutclk_data[] = {
+ 	JH71X0_GATE(JH7110_VOUTCLK_DC8200_AXI, "dc8200_axi", 0, JH7110_VOUTCLK_VOUT_TOP_AXI),
+ 	JH71X0_GATE(JH7110_VOUTCLK_DC8200_CORE, "dc8200_core", 0, JH7110_VOUTCLK_VOUT_TOP_AXI),
+ 	JH71X0_GATE(JH7110_VOUTCLK_DC8200_AHB, "dc8200_ahb", 0, JH7110_VOUTCLK_VOUT_TOP_AHB),
+-	JH71X0_GMUX(JH7110_VOUTCLK_DC8200_PIX0, "dc8200_pix0", 0, 2,
++	JH71X0_GMUX(JH7110_VOUTCLK_DC8200_PIX0, "dc8200_pix0",
++		    CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT, 2,
+ 		    JH7110_VOUTCLK_DC8200_PIX,
+ 		    JH7110_VOUTCLK_HDMITX0_PIXELCLK),
+-	JH71X0_GMUX(JH7110_VOUTCLK_DC8200_PIX1, "dc8200_pix1", 0, 2,
++	JH71X0_GMUX(JH7110_VOUTCLK_DC8200_PIX1, "dc8200_pix1",
++		    CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT, 2,
+ 		    JH7110_VOUTCLK_DC8200_PIX,
+ 		    JH7110_VOUTCLK_HDMITX0_PIXELCLK),
+ 	/* LCD */

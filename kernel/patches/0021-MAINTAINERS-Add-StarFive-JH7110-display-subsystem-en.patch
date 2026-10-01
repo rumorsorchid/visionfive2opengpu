@@ -1,0 +1,41 @@
+From dc61605b378ef0044bec9c314b1af88ab812a118 Mon Sep 17 00:00:00 2001
+From: Michal Wilczynski <m.wilczynski@samsung.com>
+Date: Tue, 29 Sep 2026 12:31:18 +0200
+Subject: [PATCH 21/41] MAINTAINERS: Add StarFive JH7110 display subsystem
+ entry
+
+The JH7110 display subsystem spans a PHY driver, a DRM bridge driver,
+a parent device and their bindings, and has no existing maintainer entry.
+
+Add an entry covering them so patches reach someone who can review them.
+
+Reviewed-by: Joshua Peisach <jpeisach@ubuntu.com>
+Signed-off-by: Michal Wilczynski <m.wilczynski@samsung.com>
+---
+ MAINTAINERS | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 72294ddfa5..bd0a485744 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -26076,6 +26076,19 @@ S:	Maintained
+ F:	Documentation/devicetree/bindings/net/starfive,jh7110-dwmac.yaml
+ F:	drivers/net/ethernet/stmicro/stmmac/dwmac-starfive.c
+ 
++STARFIVE JH7110 DISPLAY SUBSYSTEM
++M:	Michal Wilczynski <m.wilczynski@samsung.com>
++R:	Icenowy Zheng <zhengxingda@iscas.ac.cn>
++S:	Maintained
++F:	Documentation/devicetree/bindings/display/bridge/starfive,jh7110-inno-hdmi-controller.yaml
++F:	Documentation/devicetree/bindings/phy/starfive,jh7110-inno-hdmi-phy.yaml
++F:	Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-hdmi-subsystem.yaml
++F:	Documentation/devicetree/bindings/soc/starfive/starfive,jh7110-vout-subsystem.yaml
++F:	drivers/gpu/drm/bridge/jh7110-inno-hdmi.c
++F:	drivers/phy/starfive/phy-jh7110-inno-hdmi.c
++F:	drivers/soc/starfive/jh7110-hdmi-subsystem.c
++F:	drivers/soc/starfive/jh7110-vout-subsystem.c
++
+ STARFIVE JH7110 DPHY RX DRIVER
+ M:	Jack Zhu <jack.zhu@starfivetech.com>
+ M:	Changhuang Liang <changhuang.liang@starfivetech.com>

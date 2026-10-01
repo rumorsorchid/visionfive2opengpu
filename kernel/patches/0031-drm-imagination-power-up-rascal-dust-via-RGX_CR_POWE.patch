@@ -1,0 +1,65 @@
+From ec84df6c5b0f7955ab12bd98a63711c252c5c4f1 Mon Sep 17 00:00:00 2001
+From: Icenowy Zheng <uwu@icenowy.me>
+Date: Tue, 29 Sep 2026 18:41:35 +0000
+Subject: [PATCH 31/41] drm/imagination: power up rascal+dust via
+ RGX_CR_POWER_EVENT on BXE-4-32
+
+Co-developed-by: Dominique Belhachemi <db@domibel.de>
+
+(based on commit 09db317c9c229ef359e35463f8c08efd3e23c685)
+---
+ .../gpu/drm/imagination/pvr_fw_startstop.c    | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_fw_startstop.c b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+index e24ed6fc43..9bdf1c4fee 100644
+--- a/drivers/gpu/drm/imagination/pvr_fw_startstop.c
++++ b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+@@ -93,6 +93,14 @@ rogue_slc_init(struct pvr_device *pvr_dev)
+ 	return 0;
+ }
+ 
++#define RGX_CR_POWER_EVENT 0x0038U
++#define RGX_CR_POWER_EVENT_REQ_EN 0x00000002U
++#define RGX_CR_POWER_EVENT_DOMAIN_CLUSTER0_SHIFT 8U
++#define RGX_CR_POWER_EVENT_DOMAIN_SPU0_SHIFT 9U
++#define GUESS_TYPE_POWER_UP 0x1U
++#define GUESS_BIT10_SHIFT 10U
++#define GUESS_MULTICORE_MASK 0xff000000U
++
+ /**
+  * pvr_fw_start() - Start FW processor and boot firmware
+  * @pvr_dev: Target PowerVR device.
+@@ -106,6 +114,7 @@ pvr_fw_start(struct pvr_device *pvr_dev)
+ {
+ 	bool has_reset2 = PVR_HAS_FEATURE(pvr_dev, xe_tpu2);
+ 	u64 soft_reset_mask;
++	u32 power_event_val;
+ 	int err;
+ 
+ 	if (PVR_HAS_FEATURE(pvr_dev, pbe2_in_xe))
+@@ -135,6 +144,24 @@ pvr_fw_start(struct pvr_device *pvr_dev)
+ 	if (has_reset2)
+ 		(void)pvr_cr_read64(pvr_dev, ROGUE_CR_SOFT_RESET2);
+ 
++	if (pvr_gpu_id_to_packed_bvnc(&pvr_dev->gpu_id) == PVR_PACKED_BVNC(36, 50, 54, 182)) {
++		power_event_val = GUESS_MULTICORE_MASK |
++				  (1U << GUESS_BIT10_SHIFT) |
++				  (1U << RGX_CR_POWER_EVENT_DOMAIN_SPU0_SHIFT) |
++				  (1U << RGX_CR_POWER_EVENT_DOMAIN_CLUSTER0_SHIFT) |
++				  RGX_CR_POWER_EVENT_REQ_EN |
++				  GUESS_TYPE_POWER_UP;
++		pvr_cr_write32(pvr_dev, RGX_CR_POWER_EVENT, power_event_val);
++		err = pvr_cr_poll_reg32(pvr_dev, ROGUE_CR_EVENT_STATUS,
++					ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
++					ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN,
++					POLL_TIMEOUT_USEC);
++		if (err)
++			goto err_reset;
++		pvr_cr_write32(pvr_dev, RGX_CR_POWER_EVENT, 0);
++		pvr_cr_write32(pvr_dev, ROGUE_CR_EVENT_CLEAR, ROGUE_CR_EVENT_STATUS_POWER_COMPLETE_EN);
++	}
++
+ 	/* Take Rascal and Dust out of reset. */
+ 	pvr_cr_write64(pvr_dev, ROGUE_CR_SOFT_RESET,
+ 		       soft_reset_mask ^ ROGUE_CR_SOFT_RESET_RASCALDUSTS_EN);
