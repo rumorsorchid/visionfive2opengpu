@@ -1,0 +1,586 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""
+fwemu.py - boot Imagination's PowerVR MIPS firmware in an emulator.
+
+Recreates what the upstream Linux drm/imagination driver does before it
+releases the firmware processor from reset (pvr_fw.c, pvr_fw_mips.c,
+pvr_vm_mips.c), runs the firmware's microMIPS code under Unicorn and logs
+every GPU register access, every write to host-visible firmware structures
+and the firmware's own trace buffer.
+
+    fwemu.py FW.fw --kernel LINUX_SRC [--layout layout.json]
+             [--config-flags 0x10] [--max-insns N] [--trace-regs]
+
+Physical memory model (MIPS physical addresses):
+
+  HEAP_PA + off          the 16 MiB firmware heap, FW virtual 0xC0000000 + off
+  0x1FC00000/01000/02000 boot code, boot data, exception code (wrapper remap)
+  0x17C00000...          alias of the above, working around QEMU's microMIPS
+                         JAL region bug (masks PC[31:28] instead of PC[31:27])
+  0x00000000             boot code again (BRN 63553 remap)
+  PT_PA                  the 4-page MIPS page table
+  0xCF800000             the GPU register file as decoded by the MIPS wrapper
+                         (MIPS_WRAPPER_CONFIG.REGBANK = 0xCF80); +0x200000 is
+                         a write-only alias the firmware also uses
+"""
+
+import argparse
+import ctypes
+import json
+import os
+import struct
+import sys
+
+from unicorn import (UC_ARCH_MIPS, UC_HOOK_CODE, UC_HOOK_INTR, UC_HOOK_MEM_UNMAPPED,
+                     UC_HOOK_MEM_WRITE, UC_MODE_LITTLE_ENDIAN, UC_MODE_MIPS32,
+                     UC_PROT_ALL, Uc, UcError)
+from unicorn import mips_const as MC
+from unicorn.mips_const import UC_CPU_MIPS32_M14K, UC_MIPS_REG_PC, UC_MIPS_REG_RA
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from pvrfw import Firmware, Tables  # noqa: E402
+from fwregs import disassemble, load_cr_names  # noqa: E402
+import fwtrace  # noqa: E402
+import re  # noqa: E402
+import tempfile  # noqa: E402
+
+FW_HEAP_VA = 0xC0000000
+FW_HEAP_LOG2 = 24
+FW_HEAP_SIZE = 1 << FW_HEAP_LOG2
+CONFIG_HEAP_SIZE = 3 * 0x10000
+CONFIG_OFFSET = FW_HEAP_SIZE - CONFIG_HEAP_SIZE
+CONN_CTL_VA = FW_HEAP_VA + CONFIG_OFFSET
+OSINIT_VA = CONN_CTL_VA + 0x10000
+SYSINIT_VA = OSINIT_VA + 0x10000
+
+HEAP_PA = 0x80000000
+PT_PA = 0x7F000000
+REG_PA = 0x18000000          # JH7110 GPU register base (boot_data->reg_base)
+REG_BANK_PA = 0xCF800000     # where the MIPS wrapper decodes registers (REGBANK)
+PT_VIRT = 0xCF000000         # ROGUE_MIPSFW_PT_VIRTUAL_BASE
+STACK_VIRT = 0xCF600000      # ROGUE_MIPSFW_STACK_VIRTUAL_BASE
+REG_SIZE = 0x400000
+
+BOOT_REMAP_PA = 0x1FC00000
+JAL_BUG_ALIAS_PA = 0x17C00000
+
+PAGE = 0x1000
+ENTRYLO_PFN_SHIFT = 6
+ENTRYLO_DVG = 0x4 | 0x2 | 0x1
+CACHE_POLICY_ABOVE_32BIT = 1   # write-through, as the kernel uses on 36-bit cores
+UNCACHED_POLICY = 2
+
+
+GPR = {"s%d" % i: getattr(MC, "UC_MIPS_REG_S%d" % i) for i in range(8)}
+GPR.update({"s8": MC.UC_MIPS_REG_FP, "fp": MC.UC_MIPS_REG_FP, "ra": MC.UC_MIPS_REG_RA,
+            "sp": MC.UC_MIPS_REG_SP})
+
+
+def virt_to_phys(va):
+    """MIPS32 segments with the M14K fixed-mapping MMU (kernel mode)."""
+    if 0x80000000 <= va < 0xC0000000:     # kseg0/kseg1: unmapped
+        return va & 0x1FFFFFFF
+    return va                              # kseg2/3 identity (FMT)
+
+
+def parse_swm(ops):
+    """'s0-s3,ra,20(sp)' -> (['s0','s1','s2','s3','ra'], 20, 'sp')"""
+    parts = ops.split(",")
+    mem = re.match(r"(-?\d+)\((\w+)\)", parts[-1])
+    regs = []
+    for p in parts[:-1]:
+        if "-" in p:
+            a, b = p.split("-")
+            regs += ["s%d" % i for i in range(int(a[1:]), int(b[1:]) + 1)]
+        else:
+            regs.append(p)
+    return regs, int(mem.group(1)), mem.group(2)
+
+
+class Layout:
+    def __init__(self, path):
+        d = json.load(open(path))
+        self.structs, self.anon = d["structs"], d["anon"]
+
+    def size(self, name):
+        return self.structs[name]["size"]
+
+    def field(self, name, path):
+        """Return (offset, size) of a dotted member path, e.g. 'a.b[2].c'."""
+        st = self.structs[name]
+        off = 0
+        t = None
+        for part in path.split("."):
+            idx = None
+            if "[" in part:
+                part, rest = part.split("[", 1)
+                idx = int(rest.rstrip("]"), 0)
+            m = next((m for m in st["members"] if m["name"] == part), None)
+            if m is None:
+                raise KeyError("%s has no member %s" % (name, part))
+            off += m["offset"]
+            t = m["type"]
+            if idx is not None:
+                elem = t["elem"]
+                off += idx * elem["size"]
+                t = elem
+            if t["kind"] in ("struct", "union"):
+                st = self.structs.get(t.get("name")) or self.anon[str(t["die_offset"])]
+                name = t.get("name") or name
+        return off, t["size"]
+
+
+class Emu:
+    def __init__(self, fw, layout, cr_names, args):
+        self.fw, self.L, self.names, self.args = fw, layout, cr_names, args
+        self.uc = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
+        # The firmware's TLB refill handler maps every heap page identity
+        # (VA == MIPS PA) and programs a wrapper remap range from the page
+        # table. Unicorn does not deliver TLB refills to the guest, so use
+        # the fixed-mapping M14K MMU (kseg2 identity) and back MIPS PA
+        # 0xC0000000+ with the heap directly; the remap model below handles
+        # the rest.
+        self.uc.ctl_set_cpu_model(UC_CPU_MIPS32_M14K)
+        self.regs = {}
+        self.remaps = {}
+        self.remap_log = []
+        self.exceptions = 0
+        self.reg_log = []
+        self.insns = 0
+        self.alloc_next = FW_HEAP_VA + 0x100000
+        self.objects = {}
+        self.trace_lines = []
+
+        # One host buffer for the whole heap so that aliases share storage.
+        self.heap = ctypes.create_string_buffer(FW_HEAP_SIZE)
+        self.uc.mem_map_ptr(HEAP_PA, FW_HEAP_SIZE, UC_PROT_ALL, self.heap)
+        self.uc.mem_map_ptr(FW_HEAP_VA, FW_HEAP_SIZE, UC_PROT_ALL, self.heap)
+        self.pt = ctypes.create_string_buffer(4 * PAGE)
+        self.uc.mem_map_ptr(PT_PA, 4 * PAGE, UC_PROT_ALL, self.pt)
+
+        self.load_image()
+        self.map_remaps()
+        self.map_static_windows()
+        self.build_page_table()
+        self.uc.mmio_map(REG_BANK_PA, REG_SIZE, self.reg_read, None, self.reg_write, None)
+
+    # -- memory helpers ------------------------------------------------------
+    def va2off(self, va):
+        assert FW_HEAP_VA <= va < FW_HEAP_VA + FW_HEAP_SIZE, hex(va)
+        return va - FW_HEAP_VA
+
+    def write(self, va, data):
+        o = self.va2off(va)
+        ctypes.memmove(ctypes.addressof(self.heap) + o, bytes(data), len(data))
+
+    def read(self, va, n):
+        o = self.va2off(va)
+        return self.heap.raw[o:o + n]
+
+    def w32(self, va, v):
+        self.write(va, struct.pack("<I", v & 0xffffffff))
+
+    def w64(self, va, v):
+        self.write(va, struct.pack("<Q", v))
+
+    def r32(self, va):
+        return struct.unpack("<I", self.read(va, 4))[0]
+
+    def set(self, sname, base_va, path, value):
+        off, size = self.L.field(sname, path)
+        fmt = {1: "<B", 2: "<H", 4: "<I", 8: "<Q"}[size]
+        self.write(base_va + off, struct.pack(fmt, value))
+
+    def get(self, sname, base_va, path):
+        off, size = self.L.field(sname, path)
+        fmt = {1: "<B", 2: "<H", 4: "<I", 8: "<Q"}[size]
+        return struct.unpack(fmt, self.read(base_va + off, size))[0]
+
+    def alloc(self, name, size, align=PAGE):
+        va = (self.alloc_next + align - 1) & ~(align - 1)
+        self.alloc_next = (va + size + PAGE - 1) & ~(PAGE - 1)
+        self.objects[name] = (va, size)
+        return va
+
+    # -- image ---------------------------------------------------------------
+    def section(self, sid_name):
+        from pvrfw import SECTION_IDS
+        sid = SECTION_IDS.index(sid_name)
+        return next(e for e in self.fw.layout if e["id"] == sid)
+
+    def load_image(self):
+        """Mirror pvr_fw_process(): code object at heap offset 0, data
+        object at the fixed private-data address."""
+        self.code_va = FW_HEAP_VA
+        data_sec = self.section("MIPS_PRIVATE_DATA")
+        self.data_va = data_sec["base"]
+        for p in self.fw.elf()["phdrs"]:
+            if p["type"] != 1 or not p["filesz"]:
+                continue
+            for s in self.fw.layout:
+                if s["base"] <= p["vaddr"] < s["base"] + s["max_size"]:
+                    obj_va = self.code_va if s["type"] == 1 else self.data_va
+                    dst = obj_va + s["alloc_offset"] + (p["vaddr"] - s["base"])
+                    self.write(dst, self.fw.data[p["offset"]:p["offset"] + p["filesz"]])
+                    break
+        self.patch_tlb_ops()
+        self.boot_code_va = self.code_va + self.section("MIPS_BOOT_CODE")["alloc_offset"]
+        self.exc_code_va = self.code_va + self.section("MIPS_EXCEPTIONS_CODE")["alloc_offset"]
+        self.boot_data_va = self.data_va + self.section("MIPS_BOOT_DATA")["alloc_offset"]
+        self.stack_va = self.data_va + self.section("MIPS_STACK")["alloc_offset"]
+
+    def patch_tlb_ops(self):
+        """The emulated MMU is fixed-mapping (identity), so TLB maintenance
+        is meaningless and would raise Reserved Instruction. Replace
+        tlbwi/tlbwr/tlbr/tlbp with a 32-bit nop, in emulator memory only."""
+        self.tlb_patches = []
+        self.swm_sites = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            lines = disassemble(self.fw, tmp)
+        for line in lines:
+            m = re.match(r"^\s*([0-9a-f]+):\s+(?:[0-9a-f]{4}\s?){1,2}\s+swm\s+(\S+)", line)
+            if m:
+                self.swm_sites[int(m.group(1), 16)] = parse_swm(m.group(2))
+                continue
+            m = re.match(r"^\s*([0-9a-f]+):\s+0000 [0-3]37c\s+(tlb\w+)", line)
+            if not m:
+                continue
+            addr = int(m.group(1), 16)
+            for s in self.fw.layout:
+                if s["type"] == 1 and s["base"] <= addr < s["base"] + s["max_size"]:
+                    dst = self.code_va + s["alloc_offset"] + addr - s["base"]
+                    self.write(dst, b"\x00\x00\x00\x00")
+                    self.tlb_patches.append((addr, m.group(2)))
+        print("found %d swm sites (Unicorn SWM workaround)" % len(self.swm_sites))
+        print("patched %d TLB instructions: %s" % (
+            len(self.tlb_patches), ", ".join("%s@%08x" % (n, a) for a, n in self.tlb_patches)))
+
+    def pa(self, va):
+        return HEAP_PA + self.va2off(va)
+
+    def map_remaps(self):
+        """The MIPS wrapper's REMAP1/2/3 (and REMAP5 for BRN 63553)."""
+        def alias(pa, va):
+            ptr = ctypes.cast(ctypes.addressof(self.heap) + self.va2off(va), ctypes.c_void_p)
+            self.uc.mem_map_ptr(pa, PAGE, UC_PROT_ALL, ptr)
+        for base in (BOOT_REMAP_PA, JAL_BUG_ALIAS_PA):
+            alias(base + 0x0000, self.boot_code_va)
+            alias(base + 0x1000, self.boot_data_va)
+            alias(base + 0x2000, self.exc_code_va)
+        alias(0x00000000, self.boot_code_va)
+
+    def map_static_windows(self):
+        """Windows the boot loader remaps from boot data (PT pages, stack).
+        Mapping them while emulation runs does not take effect in Unicorn,
+        so map them up front and only verify the firmware's remap writes."""
+        self.expected_remaps = {}
+        for i in range(4):
+            va = PT_VIRT + i * PAGE
+            self.uc.mem_map_ptr(va, PAGE, UC_PROT_ALL,
+                                ctypes.c_void_p(ctypes.addressof(self.pt) + i * PAGE))
+            self.expected_remaps[va] = PT_PA + i * PAGE
+        stack_off = self.va2off(self.stack_va)
+        self.uc.mem_map_ptr(STACK_VIRT, PAGE, UC_PROT_ALL,
+                            ctypes.c_void_p(ctypes.addressof(self.heap) + stack_off))
+        self.expected_remaps[STACK_VIRT] = self.pa(self.stack_va)
+
+    def build_page_table(self):
+        """pvr_vm_mips_map() for every heap page we use. Uncached for
+        everything the host shares, cached for code."""
+        self.pt_entries = {}
+
+    def map_pages(self, va, size, uncached=True):
+        policy = UNCACHED_POLICY if uncached else CACHE_POLICY_ABOVE_32BIT
+        for off in range(0, size, PAGE):
+            pfn = (self.va2off(va + off)) >> 12
+            pa = self.pa(va + off)
+            pte = (((pa >> 12) << ENTRYLO_PFN_SHIFT) & 0x3FFFFFC0) | (policy << 3) | ENTRYLO_DVG
+            struct.pack_into("<I", self.pt, pfn * 4, pte)
+
+    # -- registers -------------------------------------------------------------
+    def reg_name(self, off):
+        base = off & ~3
+        alias = ""
+        if base >= 0x200000:
+            base -= 0x200000
+            alias = "@alias"
+        n = self.names.get(base) or (self.names.get(base - 4, "?") + "[hi]"
+                                     if base - 4 in self.names else "?")
+        return n + alias
+
+    def reg_read(self, uc, off, size, user_data):
+        v = self.reg_model_read(off)
+        if self.args.trace_regs:
+            print("  R %-34s +0x%06x = 0x%08x  pc=%08x" % (
+                self.reg_name(off), off, v, uc.reg_read(UC_MIPS_REG_PC)))
+        self.reg_log.append(("R", off, v))
+        return v
+
+    def reg_write(self, uc, off, size, value, user_data):
+        if self.args.trace_regs:
+            print("  W %-34s +0x%06x = 0x%08x  pc=%08x" % (
+                self.reg_name(off), off, value, uc.reg_read(UC_MIPS_REG_PC)))
+        self.reg_log.append(("W", off, value))
+        self.reg_model_write(off, value)
+
+    def reg_model_read(self, off):
+        bvnc = self.fw.bvnc
+        fixed = {
+            0x0020: bvnc & 0xffffffff,            # CORE_ID__PBVNC lo
+            0x0024: bvnc >> 32,                   # CORE_ID__PBVNC hi
+            0xF308: 1,                            # MULTICORE_SYSTEM: 1 GPU
+        }
+        if off in fixed:
+            return fixed[off]
+        if off in (0x0160, 0x0164):               # TIMER: advance with time
+            t = self.insns // 16
+            return t & 0xffffffff if off == 0x160 else t >> 32
+        if off == 0x0130:                         # EVENT_STATUS: power events complete
+            return self.regs.get(off, 0) | (0x400 if self.regs.get(0x38, 0) & 2 else 0)
+        return self.regs.get(off, 0)
+
+    def reg_model_write(self, off, value):
+        off &= ~0x200000
+        self.regs[off] = value
+        if off == 0x087C:  # MIPS_ADDR_REMAP_RANGE_CONFIG, written lo then hi
+            self.remap_update(self.regs.get(0x0878, 0) | value << 32)
+
+    # -- MIPS wrapper address remap unit -----------------------------------------
+    def host_ptr(self, pa, size):
+        for base, buf, length in ((HEAP_PA, self.heap, FW_HEAP_SIZE),
+                                  (PT_PA, self.pt, 4 * PAGE)):
+            if base <= pa and pa + size <= base + length:
+                return ctypes.c_void_p(ctypes.addressof(buf) + pa - base)
+        return None
+
+    def remap_update(self, val):
+        entry = (val >> 1) & 0x1f
+        self.remap_log.append(val)
+        if not val & 1:
+            return
+        base_in = val & 0xFFFFF000
+        size = PAGE << (2 * ((val >> 7) & 0xf))
+        out = (val >> 36) << 12
+        if self.args.trace_regs:
+            print("  remap[%2d] 0x%08x+0x%x -> 0x%09x" % (entry, base_in, size, out))
+        if base_in == REG_BANK_PA:
+            return  # register bank, decoded by the wrapper before remapping
+        if FW_HEAP_VA <= base_in < FW_HEAP_VA + FW_HEAP_SIZE:
+            # Identity-mapped heap page: already backed; check consistency.
+            if out != self.pa(base_in):
+                print("!! remap[%d] heap 0x%08x -> 0x%x, expected 0x%x" % (
+                    entry, base_in, out, self.pa(base_in)))
+            return
+        exp = self.expected_remaps.get(base_in)
+        if exp is None:
+            print("!! remap[%d] 0x%08x+0x%x -> 0x%x: unexpected window" % (
+                entry, base_in, size, out))
+        elif exp != out:
+            print("!! remap[%d] 0x%08x -> 0x%x, expected 0x%x" % (entry, base_in, out, exp))
+
+    # -- host structures (pvr_fw.c) ---------------------------------------------
+    def setup_host(self):
+        L, fw = self.L, self.fw
+        feats = fw.features()
+        # Code: cached; data, stack: cached too in the kernel (FW object default).
+        self.map_pages(self.code_va, 0x19000, uncached=False)
+        self.map_pages(self.data_va, 0x5000, uncached=False)
+
+        # Boot data (pvr_mips_init + boot_data at BOOTLDR_CONF_OFFSET 0).
+        bd = self.boot_data_va
+        self.set("rogue_mipsfw_boot_data", bd, "stack_phys_addr", self.pa(self.stack_va))
+        self.set("rogue_mipsfw_boot_data", bd, "reg_base", REG_PA)
+        for i in range(4):
+            self.set("rogue_mipsfw_boot_data", bd, "pt_phys_addr[%d]" % i, PT_PA + i * PAGE)
+        self.set("rogue_mipsfw_boot_data", bd, "pt_log2_page_size", 12)
+        self.set("rogue_mipsfw_boot_data", bd, "pt_num_pages", 4)
+
+        def obj(name, sname=None, size=None, uncached=True):
+            sz = size if size is not None else L.size(sname)
+            va = self.alloc(name, sz)
+            self.map_pages(va, (sz + PAGE - 1) & ~(PAGE - 1), uncached)
+            return va
+
+        # Config heap objects at fixed offsets.
+        for va, sname in ((CONN_CTL_VA, "rogue_fwif_connection_ctl"),
+                          (OSINIT_VA, "rogue_fwif_osinit"),
+                          (SYSINIT_VA, "rogue_fwif_sysinit")):
+            self.map_pages(va, (L.size(sname) + PAGE - 1) & ~(PAGE - 1))
+            self.objects[sname] = (va, L.size(sname))
+
+        # Kernel CCB / firmware CCB (pvr_ccb.c): 2^n slots.
+        kccb_n, fwccb_n = 7, 7
+        kccb_ctl = obj("kccb_ctl", "rogue_fwif_ccb_ctl")
+        kccb = obj("kccb", size=(1 << kccb_n) * L.size("rogue_fwif_kccb_cmd"))
+        kccb_rtn = obj("kccb_rtn", size=(1 << kccb_n) * 4)
+        fwccb_ctl = obj("fwccb_ctl", "rogue_fwif_ccb_ctl")
+        fwccb = obj("fwccb", size=(1 << fwccb_n) * L.size("rogue_fwif_fwccb_cmd"))
+        for ctl, n, cmd in ((kccb_ctl, kccb_n, "rogue_fwif_kccb_cmd"),
+                            (fwccb_ctl, fwccb_n, "rogue_fwif_fwccb_cmd")):
+            self.set("rogue_fwif_ccb_ctl", ctl, "wrap_mask", (1 << n) - 1)
+            self.set("rogue_fwif_ccb_ctl", ctl, "cmd_size", L.size(cmd))
+
+        power_sync = obj("power_sync", size=4)
+        hwrinfobuf = obj("hwrinfobuf", "rogue_fwif_hwrinfobuf")
+        obj("mmucache_sync", size=4)
+        sysdata = obj("sysdata", "rogue_fwif_sysdata")
+        fault_page = obj("fault_page", size=PAGE)
+        gpu_util = obj("gpu_util_fwcb", "rogue_fwif_gpu_util_fwcb")
+        runtime_cfg = obj("runtime_cfg", "rogue_fwif_runtime_cfg")
+        tracebuf_ctl = obj("tracebuf_ctl", "rogue_fwif_tracebuf")
+        trace_dwords = 12000
+        tracebuf = obj("tracebuf0", size=trace_dwords * 4)
+        osdata = obj("osdata", "rogue_fwif_osdata")
+
+        # Values (fw_*_init in pvr_fw.c).
+        core_clock = 409600000
+        S = "rogue_fwif_sysinit"
+        self.set(S, SYSINIT_VA, "fault_phys_addr", self.pa(fault_page))
+        self.set(S, SYSINIT_VA, "pds_exec_base", 0xDA00000000)
+        self.set(S, SYSINIT_VA, "usc_exec_base", 0xE000000000)
+        self.set(S, SYSINIT_VA, "runtime_cfg_fw_addr", runtime_cfg)
+        self.set(S, SYSINIT_VA, "trace_buf_ctl_fw_addr", tracebuf_ctl)
+        self.set(S, SYSINIT_VA, "fw_sys_data_fw_addr", sysdata)
+        self.set(S, SYSINIT_VA, "gpu_util_fw_cb_ctl_fw_addr", gpu_util)
+        self.set(S, SYSINIT_VA, "initial_core_clock_speed", core_clock)
+        self.set(S, SYSINIT_VA, "marker_val", 1)
+        self.set("rogue_fwif_sysdata", sysdata, "config_flags", self.args.config_flags)
+        self.set("rogue_fwif_runtime_cfg", runtime_cfg, "core_clock_speed", core_clock)
+        self.set("rogue_fwif_runtime_cfg", runtime_cfg, "active_pm_latency_persistant", 1)
+        self.set("rogue_fwif_runtime_cfg", runtime_cfg, "default_dusts_num_init",
+                 feats.get("NUM_CLUSTERS") or 1)
+        self.set("rogue_fwif_gpu_util_fwcb", gpu_util, "last_word", 0)  # IDLE state
+
+        O = "rogue_fwif_osinit"
+        self.set(O, OSINIT_VA, "kernel_ccbctl_fw_addr", kccb_ctl)
+        self.set(O, OSINIT_VA, "kernel_ccb_fw_addr", kccb)
+        self.set(O, OSINIT_VA, "kernel_ccb_rtn_slots_fw_addr", kccb_rtn)
+        self.set(O, OSINIT_VA, "firmware_ccbctl_fw_addr", fwccb_ctl)
+        self.set(O, OSINIT_VA, "firmware_ccb_fw_addr", fwccb)
+        self.set(O, OSINIT_VA, "rogue_fwif_hwr_info_buf_ctl_fw_addr", hwrinfobuf)
+        self.set(O, OSINIT_VA, "fw_os_data_fw_addr", osdata)
+        self.set("rogue_fwif_osdata", osdata, "power_sync_fw_addr", power_sync)
+
+        T = "rogue_fwif_tracebuf"
+        self.set(T, tracebuf_ctl, "log_type", self.args.trace_mask)
+        self.set(T, tracebuf_ctl, "tracebuf_size_in_dwords", trace_dwords)
+        self.set(T, tracebuf_ctl, "tracebuf[0].trace_buffer_fw_addr", tracebuf)
+        self.tracebuf_va, self.trace_dwords = tracebuf, trace_dwords
+        self.tracebuf_ctl = tracebuf_ctl
+
+    # -- run -------------------------------------------------------------------------
+    def run(self):
+        self.setup_host()
+        uc = self.uc
+        last_pcs = []
+
+        pending = []
+
+        def on_code(uc, addr, size, _):
+            # Unicorn's microMIPS SWM stores only 16 bits per register; it
+            # does not modify registers, so redo the stores in full once it
+            # has executed (i.e. before the next instruction).
+            while pending:
+                a, v = pending.pop()
+                uc.mem_write(virt_to_phys(a), struct.pack("<I", v))
+            site = self.swm_sites.get(addr)
+            if site:
+                regs, off, base = site
+                ea = (uc.reg_read(GPR[base]) + off) & 0xffffffff
+                for i, r in enumerate(regs):
+                    pending.append((ea + 4 * i, uc.reg_read(GPR[r])))
+            self.insns += 1
+            last_pcs.append(addr)
+            if len(last_pcs) > 64:
+                last_pcs.pop(0)
+            if self.insns >= self.args.max_insns:
+                uc.emu_stop()
+
+        def on_unmapped(uc, access, addr, size, value, _):
+            print("!! unmapped access type=%d addr=0x%08x size=%d value=0x%x pc=0x%08x" % (
+                access, addr, size, value, uc.reg_read(UC_MIPS_REG_PC)))
+            return False
+
+        def on_intr(uc, intno, _):
+            self.exceptions += 1
+            if self.args.trace_exc or self.exceptions <= 5:
+                print("!! exception %d at pc=0x%08x ra=0x%08x" % (
+                    intno, uc.reg_read(UC_MIPS_REG_PC), uc.reg_read(UC_MIPS_REG_RA)))
+
+        uc.hook_add(UC_HOOK_CODE, on_code)
+
+        def on_watch(uc, access, addr, size, value, _):
+            print("  watch: %s 0x%08x size %d value 0x%x pc=0x%08x" % (
+                "W" if access == 17 else "R", addr, size, value, uc.reg_read(UC_MIPS_REG_PC)))
+        for w in self.args.watch or []:
+            lo, _, hi = w.partition("-")
+            lo = int(lo, 0)
+            hi = int(hi, 0) if hi else lo + 4
+            uc.hook_add(UC_HOOK_MEM_WRITE, on_watch, begin=lo, end=hi - 1)
+        uc.hook_add(UC_HOOK_MEM_UNMAPPED, on_unmapped)
+        uc.hook_add(UC_HOOK_INTR, on_intr)
+
+        # Reset: the MIPS core starts at 0xBFC00000 in microMIPS mode
+        # (MIPS_WRAPPER_CONFIG.BOOT_ISA_MODE). Unicorn cannot set ISA mode
+        # from emu_start, so enter through a 4-instruction MIPS32 trampoline.
+        tramp_pa = 0x1FC03000
+        uc.mem_map(tramp_pa, PAGE)
+        uc.mem_write(tramp_pa, struct.pack("<4I", 0x3c19bfc0, 0x37390001, 0x03200008, 0))
+        try:
+            uc.emu_start(0xBFC03000, 0xFFFFFFFF, count=0)
+        except UcError as e:
+            print("!! emulation stopped: %s at pc=0x%08x" % (e, uc.reg_read(UC_MIPS_REG_PC)))
+        started = self.get("rogue_fwif_sysinit", SYSINIT_VA, "firmware_started")
+        print("\nexecuted %d instructions; firmware_started=%d" % (self.insns, started))
+        print("last PCs:", " ".join("%08x" % p for p in last_pcs[-16:]))
+        self.report()
+        return started
+
+    def trace(self):
+        tp = self.get("rogue_fwif_tracebuf", self.tracebuf_ctl, "tracebuf[0].trace_pointer")
+        raw = self.read(self.tracebuf_va, self.trace_dwords * 4)
+        dwords = struct.unpack("<%dI" % self.trace_dwords, raw)
+        return fwtrace.decode(dwords, self.sf_table, 0, tp)
+
+    def report(self):
+        C = "rogue_fwif_connection_ctl"
+        print("connection: fw_state=%d os_state=%d alive_fw_token=%d" % (
+            self.get(C, CONN_CTL_VA, "connection_fw_state"),
+            self.get(C, CONN_CTL_VA, "connection_os_state"),
+            self.get(C, CONN_CTL_VA, "alive_fw_token")))
+        sysdata = self.objects["sysdata"][0]
+        print("sysdata: pow_state=%d" % self.get("rogue_fwif_sysdata", sysdata, "pow_state"))
+        writes = [(o, v) for k, o, v in self.reg_log if k == "W"]
+        print("register writes: %d (%d distinct registers), reads: %d" % (
+            len(writes), len({o for o, _ in writes}), len(self.reg_log) - len(writes)))
+        if self.args.trace_mask:
+            print("\nfirmware trace:")
+            for ts, msg in self.trace():
+                print("  [%d] %s" % (ts, msg))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("fw")
+    ap.add_argument("--kernel", required=True)
+    ap.add_argument("--layout", default=os.path.join(HERE, "layout.json"))
+    ap.add_argument("--config-flags", type=lambda x: int(x, 0), default=0)
+    ap.add_argument("--trace-mask", type=lambda x: int(x, 0), default=0x80007FFF,
+                    help="firmware log_type (default: all groups); 0 disables")
+    ap.add_argument("--max-insns", type=int, default=2_000_000)
+    ap.add_argument("--trace-regs", action="store_true")
+    ap.add_argument("--trace-exc", action="store_true")
+    ap.add_argument("--watch", action="append",
+                    help="log writes to ADDR or LO-HI (virtual addresses)")
+    args = ap.parse_args()
+    fw = Firmware(args.fw, Tables(args.kernel))
+    emu = Emu(fw, Layout(args.layout), load_cr_names(args.kernel), args)
+    emu.sf_table = fwtrace.load_sf_table(args.kernel)
+    emu.run()
+
+
+if __name__ == "__main__":
+    main()

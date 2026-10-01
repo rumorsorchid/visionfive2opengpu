@@ -1,0 +1,7804 @@
+{
+ "structs": {
+  "rogue_fwif_dma_addr": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "dev_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fw_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_ufo": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "value",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_sync_checkpoint": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "state",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_ref_count",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cleanup_ctl": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "submitted_commands",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "executed_commands",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_common": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "frame_num",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_geom_frag_shared": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "cmn",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cmd_common",
+      "size": 4,
+      "die_offset": 1505
+     }
+    },
+    {
+     "name": "hwrt_data_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pr_buffer_fw_addr",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cccb_ctl": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "write_offset",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "read_offset",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "dep_offset",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wrap_mask",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "read_offset2",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "read_offset3",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "read_offset4",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_geom_registers_caswitch": {
+   "kind": "struct",
+   "size": 184,
+   "members": [
+    {
+     "name": "geom_reg_vdm_context_state_base_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_state_resume_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_ta_context_state_base_addr",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_state",
+     "offset": 24,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": null,
+       "size": 80,
+       "die_offset": 1716
+      },
+      "dims": [
+       2
+      ],
+      "size": 160
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cdm_registers_cswitch": {
+   "kind": "struct",
+   "size": 56,
+   "members": [
+    {
+     "name": "cdmreg_cdm_context_pds0",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_context_pds1",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_terminate_pds",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_terminate_pds1",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_resume_pds0",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_context_pds0_b",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdmreg_cdm_resume_pds0_b",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_static_rendercontext_state": {
+   "kind": "struct",
+   "size": 368,
+   "members": [
+    {
+     "name": "ctxswitch_regs",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_geom_registers_caswitch",
+       "size": 184,
+       "die_offset": 1856
+      },
+      "dims": [
+       2
+      ],
+      "size": 368
+     }
+    }
+   ]
+  },
+  "rogue_fwif_static_computecontext_state": {
+   "kind": "struct",
+   "size": 56,
+   "members": [
+    {
+     "name": "ctxswitch_regs",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cdm_registers_cswitch",
+      "size": 56,
+      "die_offset": 1937
+     }
+    }
+   ]
+  },
+  "rogue_fwif_prbuffer": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "buffer_id",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "on_demand",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "state",
+     "offset": 8,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_prbuffer_state",
+      "size": 4
+     }
+    },
+    {
+     "name": "cleanup_sate",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cleanup_ctl",
+      "size": 8,
+      "die_offset": 1466
+     }
+    },
+    {
+     "name": "prbuffer_flags",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_context_reset_reason_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "reset_reason",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reset_ext_job_ref",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_log_group_map_entry": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "log_group_name",
+     "offset": 0,
+     "type": {
+      "kind": "pointer",
+      "size": 8
+     }
+    },
+    {
+     "name": "log_group_type",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_file_info_buf": {
+   "kind": "struct",
+   "size": 408,
+   "members": [
+    {
+     "name": "path",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "char",
+       "size": 1
+      },
+      "dims": [
+       200
+      ],
+      "size": 200
+     }
+    },
+    {
+     "name": "info",
+     "offset": 200,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "char",
+       "size": 1
+      },
+      "dims": [
+       200
+      ],
+      "size": 200
+     }
+    },
+    {
+     "name": "line_num",
+     "offset": 400,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 404,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_tracebuf_space": {
+   "kind": "struct",
+   "size": 424,
+   "members": [
+    {
+     "name": "trace_pointer",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "trace_buffer_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "trace_buffer",
+     "offset": 8,
+     "type": {
+      "kind": "pointer",
+      "size": 8
+     }
+    },
+    {
+     "name": "assert_buf",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_file_info_buf",
+      "size": 408,
+      "die_offset": 2549
+     }
+    }
+   ]
+  },
+  "rogue_fw_fault_info": {
+   "kind": "struct",
+   "size": 432,
+   "members": [
+    {
+     "name": "cr_timer",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "os_timer",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "data",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fault_buf",
+     "offset": 24,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_file_info_buf",
+      "size": 408,
+      "die_offset": 2549
+     }
+    }
+   ]
+  },
+  "rogue_fwif_os_runtime_flags": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "os_state",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4
+     }
+    },
+    {
+     "name": "fl_ok",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4
+     }
+    },
+    {
+     "name": "fl_grow_pending",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4
+     }
+    },
+    {
+     "name": "isolated_os",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4
+     }
+    }
+   ]
+  },
+  "rogue_fwif_slr_entry": {
+   "kind": "struct",
+   "size": 48,
+   "members": [
+    {
+     "name": "timestamp",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fw_ctx_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "num_ufos",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ccb_name",
+     "offset": 16,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "char",
+       "size": 1
+      },
+      "dims": [
+       30
+      ],
+      "size": 30
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 46,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "char",
+       "size": 1
+      },
+      "dims": [
+       2
+      ],
+      "size": 2
+     }
+    }
+   ]
+  },
+  "rogue_fwif_tracebuf": {
+   "kind": "struct",
+   "size": 864,
+   "members": [
+    {
+     "name": "log_type",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tracebuf",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_tracebuf_space",
+       "size": 424,
+       "die_offset": 2631
+      },
+      "dims": [
+       2
+      ],
+      "size": 848
+     }
+    },
+    {
+     "name": "tracebuf_size_in_dwords",
+     "offset": 856,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tracebuf_flags",
+     "offset": 860,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_sysdata": {
+   "kind": "struct",
+   "size": 3624,
+   "members": [
+    {
+     "name": "config_flags",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "config_flags_ext",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pow_state",
+     "offset": 8,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_pow_state",
+      "size": 4
+     }
+    },
+    {
+     "name": "hw_perf_ridx",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hw_perf_widx",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hw_perf_wrap_count",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hw_perf_size",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hw_perf_drop_count",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hw_perf_ut",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "first_drop_ordinal",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "last_drop_ordinal",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "os_runtime_flags_mirror",
+     "offset": 44,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_os_runtime_flags",
+       "size": 4,
+       "die_offset": 2912
+      },
+      "dims": [
+       8
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "fault_info",
+     "offset": 80,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fw_fault_info",
+       "size": 432,
+       "die_offset": 2703
+      },
+      "dims": [
+       8
+      ],
+      "size": 3456
+     }
+    },
+    {
+     "name": "fw_faults",
+     "offset": 3536,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cr_poll_addr",
+     "offset": 3540,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    },
+    {
+     "name": "cr_poll_mask",
+     "offset": 3548,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    },
+    {
+     "name": "cr_poll_count",
+     "offset": 3556,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    },
+    {
+     "name": "start_idle_time",
+     "offset": 3568,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "hwr_state_flags",
+     "offset": 3576,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_recovery_flags",
+     "offset": 3580,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 36
+     }
+    },
+    {
+     "name": "fw_sys_data_flags",
+     "offset": 3616,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "mc_config",
+     "offset": 3620,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_osdata": {
+   "kind": "struct",
+   "size": 584,
+   "members": [
+    {
+     "name": "fw_os_config_flags",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_sync_check_mark",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "host_sync_check_mark",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "forced_updates_requested",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "slr_log_wp",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned char",
+      "size": 1,
+      "typedef": "__uint8_t"
+     }
+    },
+    {
+     "name": "slr_log_first",
+     "offset": 24,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_slr_entry",
+      "size": 48,
+      "die_offset": 2985
+     }
+    },
+    {
+     "name": "slr_log",
+     "offset": 72,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_slr_entry",
+       "size": 48,
+       "die_offset": 2985
+      },
+      "dims": [
+       10
+      ],
+      "size": 480
+     }
+    },
+    {
+     "name": "last_forced_update_time",
+     "offset": 552,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "interrupt_count",
+     "offset": 560,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    },
+    {
+     "name": "kccb_cmds_executed",
+     "offset": 568,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "power_sync_fw_addr",
+     "offset": 572,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_os_data_flags",
+     "offset": 576,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 580,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_bifinfo": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "bif_req_status",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "bif_mmu_status",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pc_address",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_eccinfo": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "fault_gpu",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_mmuinfo": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "mmu_status",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 16
+     }
+    },
+    {
+     "name": "pc_address",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_pollinfo": {
+   "kind": "struct",
+   "size": 24,
+   "members": [
+    {
+     "name": "thread_num",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cr_poll_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cr_poll_mask",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cr_poll_last_value",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_tlbinfo": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "bad_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "entry_lo",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_hwrinfo": {
+   "kind": "struct",
+   "size": 136,
+   "members": [
+    {
+     "name": "hwr_data",
+     "offset": 0,
+     "type": {
+      "kind": "union",
+      "name": null,
+      "size": 32,
+      "die_offset": 4153
+     }
+    },
+    {
+     "name": "cr_timer",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "os_timer",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "frame_num",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pid",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "active_hwrt_data",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_number",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_status",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_recovery_flags",
+     "offset": 68,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_type",
+     "offset": 72,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_hwrtype",
+      "size": 4
+     }
+    },
+    {
+     "name": "dm",
+     "offset": 76,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "core_id",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cr_time_of_kick",
+     "offset": 88,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cr_time_hw_reset_start",
+     "offset": 96,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cr_time_hw_reset_finish",
+     "offset": 104,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cr_time_freelist_ready",
+     "offset": 112,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 120,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       2
+      ],
+      "size": 16
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwrinfobuf": {
+   "kind": "struct",
+   "size": 2336,
+   "members": [
+    {
+     "name": "hwr_info",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_hwrinfo",
+       "size": 136,
+       "die_offset": 4226
+      },
+      "dims": [
+       16
+      ],
+      "size": 2176
+     }
+    },
+    {
+     "name": "hwr_counter",
+     "offset": 2176,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "write_index",
+     "offset": 2180,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "dd_req_count",
+     "offset": 2184,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_info_buf_flags",
+     "offset": 2188,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_dm_locked_up_count",
+     "offset": 2192,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 36
+     }
+    },
+    {
+     "name": "hwr_dm_overran_count",
+     "offset": 2228,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 36
+     }
+    },
+    {
+     "name": "hwr_dm_recovered_count",
+     "offset": 2264,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 36
+     }
+    },
+    {
+     "name": "hwr_dm_false_detect_count",
+     "offset": 2300,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 36
+     }
+    }
+   ]
+  },
+  "rogue_fw_register_list": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "reg_num",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "indirect_reg_num",
+     "offset": 2,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "indirect_start_val",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "indirect_end_val",
+     "offset": 6,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_dllist_node": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "p",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "n",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwmemcontext": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "pc_dev_paddr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "page_cat_base_reg_set",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "breakpoint_addr",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bp_handler_addr",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "breakpoint_ctl",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_mem_ctx_flags",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_geom_ctx_state_per_geom": {
+   "kind": "struct",
+   "size": 40,
+   "members": [
+    {
+     "name": "geom_reg_vdm_call_stack_pointer",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_call_stack_pointer_init",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vbs_so_prim",
+     "offset": 16,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 16
+     }
+    },
+    {
+     "name": "geom_current_idx",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 34,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "short unsigned int",
+       "size": 2,
+       "typedef": "__uint16_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 6
+     }
+    }
+   ]
+  },
+  "rogue_fwif_geom_ctx_state": {
+   "kind": "struct",
+   "size": 160,
+   "members": [
+    {
+     "name": "geom_core",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_geom_ctx_state_per_geom",
+       "size": 40,
+       "die_offset": 4944
+      },
+      "dims": [
+       4
+      ],
+      "size": 160
+     }
+    }
+   ]
+  },
+  "rogue_fwif_frag_ctx_state": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "frag_reg_pm_deallocated_mask_status",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "frag_reg_dm_pds_mtilefree_status",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ctx_state_flags",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "frag_reg_isp_store",
+     "offset": 12,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       0
+      ],
+      "size": 0
+     }
+    }
+   ]
+  },
+  "rogue_fwif_compute_ctx_state": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "ctx_state_flags",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwcommoncontext": {
+   "kind": "struct",
+   "size": 152,
+   "members": [
+    {
+     "name": "ccbctl_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ccb_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ccb_meta_dma_addr",
+     "offset": 8,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dma_addr",
+      "size": 16,
+      "die_offset": 1335
+     }
+    },
+    {
+     "name": "context_state_addr",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_com_ctx_flags",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "priority",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "priority_seq_num",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rf_cmd_addr",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "stats_pending",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "stats_num_stores",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "int",
+      "size": 4,
+      "typedef": "__int32_t"
+     }
+    },
+    {
+     "name": "stats_num_out_of_memory",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "int",
+      "size": 4,
+      "typedef": "__int32_t"
+     }
+    },
+    {
+     "name": "stats_num_partial_renders",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "int",
+      "size": 4,
+      "typedef": "__int32_t"
+     }
+    },
+    {
+     "name": "dm",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wait_signal_address",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "wait_signal_node",
+     "offset": 72,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dllist_node",
+      "size": 8,
+      "die_offset": 4792
+     }
+    },
+    {
+     "name": "buf_stalled_node",
+     "offset": 80,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dllist_node",
+      "size": 8,
+      "die_offset": 4792
+     }
+    },
+    {
+     "name": "cbuf_queue_ctrl_addr",
+     "offset": 88,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "robustness_address",
+     "offset": 96,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "max_deadline_ms",
+     "offset": 104,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "read_offset_needs_reset",
+     "offset": 108,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "waiting_node",
+     "offset": 112,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dllist_node",
+      "size": 8,
+      "die_offset": 4792
+     }
+    },
+    {
+     "name": "run_node",
+     "offset": 120,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dllist_node",
+      "size": 8,
+      "die_offset": 4792
+     }
+    },
+    {
+     "name": "last_failed_ufo",
+     "offset": 128,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_ufo",
+      "size": 8,
+      "die_offset": 1388
+     }
+    },
+    {
+     "name": "fw_mem_context_fw_addr",
+     "offset": 136,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "server_common_context_id",
+     "offset": 140,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pid",
+     "offset": 144,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "geom_oom_disabled",
+     "offset": 148,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwrendercontext": {
+   "kind": "struct",
+   "size": 680,
+   "members": [
+    {
+     "name": "geom_context",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwcommoncontext",
+      "size": 152,
+      "die_offset": 5223
+     }
+    },
+    {
+     "name": "frag_context",
+     "offset": 152,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwcommoncontext",
+      "size": 152,
+      "die_offset": 5223
+     }
+    },
+    {
+     "name": "static_render_context_state",
+     "offset": 304,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_static_rendercontext_state",
+      "size": 368,
+      "die_offset": 2041
+     }
+    },
+    {
+     "name": "work_est_ccb_submitted",
+     "offset": 672,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_render_ctx_flags",
+     "offset": 676,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwcomputecontext": {
+   "kind": "struct",
+   "size": 232,
+   "members": [
+    {
+     "name": "cdm_context",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwcommoncontext",
+      "size": 152,
+      "die_offset": 5223
+     }
+    },
+    {
+     "name": "static_compute_context_state",
+     "offset": 152,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_static_computecontext_state",
+      "size": 56,
+      "die_offset": 2085
+     }
+    },
+    {
+     "name": "work_est_ccb_submitted",
+     "offset": 208,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "compute_ctx_flags",
+     "offset": 212,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wgp_state",
+     "offset": 216,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wgp_checksum",
+     "offset": 220,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "core_mask_a",
+     "offset": 224,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "core_mask_b",
+     "offset": 228,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwtdmcontext": {
+   "kind": "struct",
+   "size": 160,
+   "members": [
+    {
+     "name": "tdm_context",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwcommoncontext",
+      "size": 152,
+      "die_offset": 5223
+     }
+    },
+    {
+     "name": "work_est_ccb_submitted",
+     "offset": 152,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwtransfercontext": {
+   "kind": "struct",
+   "size": 152,
+   "members": [
+    {
+     "name": "tq_context",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwcommoncontext",
+      "size": 152,
+      "die_offset": 5223
+     }
+    }
+   ]
+  },
+  "rogue_fwif_ccb_ctl": {
+   "kind": "struct",
+   "size": 144,
+   "members": [
+    {
+     "name": "write_offset",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 4,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned char",
+       "size": 1,
+       "typedef": "__uint8_t"
+      },
+      "dims": [
+       124
+      ],
+      "size": 124
+     }
+    },
+    {
+     "name": "read_offset",
+     "offset": 128,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wrap_mask",
+     "offset": 132,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cmd_size",
+     "offset": 136,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding2",
+     "offset": 140,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_mmucachedata": {
+   "kind": "struct",
+   "size": 12,
+   "members": [
+    {
+     "name": "cache_flags",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "mmu_cache_sync_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "mmu_cache_sync_update_value",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_bpdata": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "fw_mem_context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bp_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bp_handler_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bp_dm",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bp_data_flags",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "temp_regs",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "shared_regs",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "dm",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_kccb_cmd_kick_data": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "client_woff_update",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "client_wrap_mask_update",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "num_cleanup_ctl",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cleanup_ctl_fw_addr",
+     "offset": 16,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 12
+     }
+    },
+    {
+     "name": "work_est_cmd_header_offset",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_kccb_cmd_combined_geom_frag_kick_data": {
+   "kind": "struct",
+   "size": 64,
+   "members": [
+    {
+     "name": "geom_cmd_kick_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_kccb_cmd_kick_data",
+      "size": 32,
+      "die_offset": 6216
+     }
+    },
+    {
+     "name": "frag_cmd_kick_data",
+     "offset": 32,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_kccb_cmd_kick_data",
+      "size": 32,
+      "die_offset": 6216
+     }
+    }
+   ]
+  },
+  "rogue_fwif_kccb_cmd_force_update_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ccb_fence_offset",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cleanup_request": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "cleanup_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_cleanup_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "cleanup_data",
+     "offset": 4,
+     "type": {
+      "kind": "union",
+      "name": null,
+      "size": 4,
+      "die_offset": 6455
+     }
+    }
+   ]
+  },
+  "rogue_fwif_power_request": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "pow_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_power_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "power_req_data",
+     "offset": 4,
+     "type": {
+      "kind": "union",
+      "name": null,
+      "size": 4,
+      "die_offset": 6632
+     }
+    }
+   ]
+  },
+  "rogue_fwif_slcflushinvaldata": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "inval",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "dm_context",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "address",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "size",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwperf_ctrl": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "opcode",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_hwperf_update_config",
+      "size": 4
+     }
+    },
+    {
+     "name": "mask",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwperf_config_enable_blks": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "num_blocks",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "block_configs_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwperf_config_da_blks": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "num_blocks",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "block_configs_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_coreclkspeedchange_data": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "new_clock_speed",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwperf_ctrl_blks": {
+   "kind": "struct",
+   "size": 40,
+   "members": [
+    {
+     "name": "enable",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "num_blocks",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "block_ids",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "short unsigned int",
+       "size": 2,
+       "typedef": "__uint16_t"
+      },
+      "dims": [
+       16
+      ],
+      "size": 32
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwperf_select_custom_cntrs": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "custom_block",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "num_counters",
+     "offset": 2,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "custom_counter_ids_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_zsbuffer_backing_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "zs_buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "done",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    }
+   ]
+  },
+  "rogue_fwif_freelist_gs_data": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "freelist_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "delta_pages",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "new_pages",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ready_pages",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_freelists_reconstruction_data": {
+   "kind": "struct",
+   "size": 76,
+   "members": [
+    {
+     "name": "freelist_count",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freelist_ids",
+     "offset": 4,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       18
+      ],
+      "size": 72
+     }
+    }
+   ]
+  },
+  "rogue_fwif_write_offset_update_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "pdvfs_opp": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "volt",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freq",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_pdvfs_opp": {
+   "kind": "struct",
+   "size": 136,
+   "members": [
+    {
+     "name": "opp_values",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "pdvfs_opp",
+       "size": 8,
+       "die_offset": 7332
+      },
+      "dims": [
+       16
+      ],
+      "size": 128
+     }
+    },
+    {
+     "name": "min_opp_point",
+     "offset": 128,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "max_opp_point",
+     "offset": 132,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_pdvfs_max_freq_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "max_opp_point",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_pdvfs_min_freq_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "min_opp_point",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_reg_cfg_rec": {
+   "kind": "struct",
+   "size": 24,
+   "members": [
+    {
+     "name": "sddr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "mask",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "value",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_regconfig_data": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "cmd_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_regdata_cmd_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "reg_config_type",
+     "offset": 4,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_reg_cfg_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "reg_config",
+     "offset": 8,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_reg_cfg_rec",
+      "size": 24,
+      "die_offset": 7613
+     }
+    }
+   ]
+  },
+  "rogue_fwif_reg_cfg": {
+   "kind": "struct",
+   "size": 12296,
+   "members": [
+    {
+     "name": "num_regs_type",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned char",
+       "size": 1,
+       "typedef": "__uint8_t"
+      },
+      "dims": [
+       8
+      ],
+      "size": 8
+     }
+    },
+    {
+     "name": "reg_configs",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_reg_cfg_rec",
+       "size": 24,
+       "die_offset": 7613
+      },
+      "dims": [
+       512
+      ],
+      "size": 12288
+     }
+    }
+   ]
+  },
+  "rogue_fwif_os_state_change_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "osid",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "new_os_state",
+     "offset": 4,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_os_state_change",
+      "size": 4
+     }
+    }
+   ]
+  },
+  "rogue_fwif_counter_dump_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "counter_dump_request",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_counter_dump_request",
+      "size": 4
+     }
+    }
+   ]
+  },
+  "rogue_fwif_kccb_cmd": {
+   "kind": "struct",
+   "size": 88,
+   "members": [
+    {
+     "name": "cmd_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_kccb_cmd_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "kccb_flags",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cmd_data",
+     "offset": 8,
+     "type": {
+      "kind": "union",
+      "name": null,
+      "size": 80,
+      "die_offset": 8228
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_zsbuffer_backing_data": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "zs_buffer_id",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_freelist_gs_data": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "freelist_id",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_freelists_reconstruction_data": {
+   "kind": "struct",
+   "size": 80,
+   "members": [
+    {
+     "name": "freelist_count",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_counter",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freelist_ids",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       18
+      ],
+      "size": 72
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_context_reset_data": {
+   "kind": "struct",
+   "size": 40,
+   "members": [
+    {
+     "name": "server_common_context_id",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reset_reason",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "dm",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reset_job_ref",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "flags",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pc_address",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fault_address",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_fw_pagefault_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "fw_fault_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_update_stats_data": {
+   "kind": "struct",
+   "size": 12,
+   "members": [
+    {
+     "name": "element_to_update",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_fwccb_cmd_update_stats_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "pid_owner",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "adjustment_value",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "int",
+      "size": 4,
+      "typedef": "__int32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd_core_clk_rate_change_data": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "core_clk_rate",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_fwccb_cmd": {
+   "kind": "struct",
+   "size": 88,
+   "members": [
+    {
+     "name": "cmd_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_fwccb_cmd_type",
+      "size": 4
+     }
+    },
+    {
+     "name": "fwccb_flags",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cmd_data",
+     "offset": 8,
+     "type": {
+      "kind": "union",
+      "name": null,
+      "size": 80,
+      "die_offset": 9093
+     }
+    }
+   ]
+  },
+  "rogue_fwif_workest_fwccb_cmd": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "return_data_index",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "cycles_taken",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_workest_kick_data": {
+   "kind": "struct",
+   "size": 24,
+   "members": [
+    {
+     "name": "return_data_index",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "cycles_prediction",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "deadline",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_ccb_cmd_header": {
+   "kind": "struct",
+   "size": 40,
+   "members": [
+    {
+     "name": "cmd_type",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cmd_size",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ext_job_ref",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "int_job_ref",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "work_est_kick_data",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_workest_kick_data",
+      "size": 24,
+      "die_offset": 9289
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_priority": {
+   "kind": "struct",
+   "size": 4,
+   "members": [
+    {
+     "name": "priority",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "int",
+      "size": 4,
+      "typedef": "__int32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_sigbuf_ctl": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "left_size_in_regs",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_counter_dump_ctl": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "size_in_dwords",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_firmware_gcov_ctl": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "size",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_compchecks_bvnc": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "layout_version",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bvnc",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_init_options": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "os_count_support",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned char",
+      "size": 1,
+      "typedef": "__uint8_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 1,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned char",
+       "size": 1,
+       "typedef": "__uint8_t"
+      },
+      "dims": [
+       7
+      ],
+      "size": 7
+     }
+    }
+   ]
+  },
+  "rogue_fwif_compchecks": {
+   "kind": "struct",
+   "size": 64,
+   "members": [
+    {
+     "name": "hw_bvnc",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_compchecks_bvnc",
+      "size": 16,
+      "die_offset": 9592
+     }
+    },
+    {
+     "name": "fw_bvnc",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_compchecks_bvnc",
+      "size": 16,
+      "die_offset": 9592
+     }
+    },
+    {
+     "name": "fw_processor_version",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ddk_version",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ddk_build",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "build_options",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "init_options",
+     "offset": 48,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_init_options",
+      "size": 8,
+      "die_offset": 9636
+     }
+    },
+    {
+     "name": "updated",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_runtime_cfg": {
+   "kind": "struct",
+   "size": 72,
+   "members": [
+    {
+     "name": "active_pm_latency_ms",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "runtime_cfg_flags",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "active_pm_latency_persistant",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "core_clock_speed",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "default_dusts_num_init",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "phr_mode",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hcs_deadline_ms",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "wdg_period_us",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "osid_priority",
+     "offset": 32,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       8
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "hwperf_buf_fw_addr",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 68,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    }
+   ]
+  },
+  "rogue_fwif_connection_ctl": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "connection_fw_state",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_connection_fw_state",
+      "size": 4
+     }
+    },
+    {
+     "name": "connection_os_state",
+     "offset": 4,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_connection_os_state",
+      "size": 4
+     }
+    },
+    {
+     "name": "alive_fw_token",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "alive_os_token",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_osinit": {
+   "kind": "struct",
+   "size": 104,
+   "members": [
+    {
+     "name": "kernel_ccbctl_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "kernel_ccb_fw_addr",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "kernel_ccb_rtn_slots_fw_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "firmware_ccbctl_fw_addr",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "firmware_ccb_fw_addr",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "work_est_firmware_ccbctl_fw_addr",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "work_est_firmware_ccb_fw_addr",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rogue_fwif_hwr_info_buf_ctl_fw_addr",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwr_debug_dump_limit",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_os_data_fw_addr",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rogue_comp_checks",
+     "offset": 40,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_compchecks",
+      "size": 64,
+      "die_offset": 9695
+     }
+    }
+   ]
+  },
+  "rogue_hwperf_bvnc_block": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "block_id",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "num_counters",
+     "offset": 2,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "num_blocks",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 6,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    }
+   ]
+  },
+  "rogue_hwperf_bvnc": {
+   "kind": "struct",
+   "size": 160,
+   "members": [
+    {
+     "name": "bvnc_string",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "char",
+       "size": 1
+      },
+      "dims": [
+       24
+      ],
+      "size": 24
+     }
+    },
+    {
+     "name": "bvnc_km_feature_flags",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "num_bvnc_blocks",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "bvnc_gpu_cores",
+     "offset": 30,
+     "type": {
+      "kind": "base",
+      "name": "short unsigned int",
+      "size": 2,
+      "typedef": "__uint16_t"
+     }
+    },
+    {
+     "name": "bvnc_blocks",
+     "offset": 32,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_hwperf_bvnc_block",
+       "size": 8,
+       "die_offset": 10492
+      },
+      "dims": [
+       16
+      ],
+      "size": 128
+     }
+    }
+   ]
+  },
+  "rogue_fwif_sysinit": {
+   "kind": "struct",
+   "size": 544,
+   "members": [
+    {
+     "name": "fault_phys_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pds_exec_base",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "usc_exec_base",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fbcdc_state_table_base",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fbcdc_large_state_table_base",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "texture_heap_base",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "hw_perf_filter",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "slc3_fence_dev_addr",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "tpu_trilinear_frac_mask",
+     "offset": 64,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 16
+     }
+    },
+    {
+     "name": "sigbuf_ctl",
+     "offset": 80,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_sigbuf_ctl",
+       "size": 8,
+       "die_offset": 9463
+      },
+      "dims": [
+       9
+      ],
+      "size": 72
+     }
+    },
+    {
+     "name": "pdvfs_opp_info",
+     "offset": 152,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_pdvfs_opp",
+      "size": 136,
+      "die_offset": 7375
+     }
+    },
+    {
+     "name": "coremem_data_store",
+     "offset": 288,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dma_addr",
+      "size": 16,
+      "die_offset": 1335
+     }
+    },
+    {
+     "name": "counter_dump_ctl",
+     "offset": 304,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_counter_dump_ctl",
+      "size": 8,
+      "die_offset": 9506
+     }
+    },
+    {
+     "name": "filter_flags",
+     "offset": 312,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "runtime_cfg_fw_addr",
+     "offset": 316,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "trace_buf_ctl_fw_addr",
+     "offset": 320,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "fw_sys_data_fw_addr",
+     "offset": 324,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "gpu_util_fw_cb_ctl_fw_addr",
+     "offset": 328,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reg_cfg_fw_addr",
+     "offset": 332,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwperf_ctl_fw_addr",
+     "offset": 336,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "align_checks",
+     "offset": 340,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "initial_core_clock_speed",
+     "offset": 344,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "active_pm_latency_ms",
+     "offset": 348,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "firmware_started",
+     "offset": 352,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "marker_val",
+     "offset": 356,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "firmware_started_timestamp",
+     "offset": 360,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "jones_disable_mask",
+     "offset": 364,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "firmware_perf",
+     "offset": 368,
+     "type": {
+      "kind": "enum",
+      "name": "fw_perf_conf",
+      "size": 4
+     }
+    },
+    {
+     "name": "core_clock_rate_fw_addr",
+     "offset": 372,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "gpio_validation_mode",
+     "offset": 376,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_gpio_val_mode",
+      "size": 4
+     }
+    },
+    {
+     "name": "bvnc_km_feature_flags",
+     "offset": 380,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_hwperf_bvnc",
+      "size": 160,
+      "die_offset": 10562
+     }
+    },
+    {
+     "name": "tfbc_compression_control",
+     "offset": 540,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_time_corr": {
+   "kind": "struct",
+   "size": 40,
+   "members": [
+    {
+     "name": "os_timestamp",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "os_mono_timestamp",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cr_timestamp",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cr_delta_to_os_delta_kns",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "core_clock_speed",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reserved",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_gpu_util_fwcb": {
+   "kind": "struct",
+   "size": 10280,
+   "members": [
+    {
+     "name": "time_corr",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_fwif_time_corr",
+       "size": 40,
+       "die_offset": 11188
+      },
+      "dims": [
+       256
+      ],
+      "size": 10240
+     }
+    },
+    {
+     "name": "time_corr_seq_count",
+     "offset": 10240,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "gpu_util_flags",
+     "offset": 10244,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "last_word",
+     "offset": 10248,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "stats_counters",
+     "offset": 10256,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 24
+     }
+    }
+   ]
+  },
+  "rogue_fwif_rta_ctl": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "render_target_index",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "current_render_target",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "active_render_targets",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cumul_active_render_targets",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "valid_render_targets_fw_addr",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rta_num_partial_renders_fw_addr",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "max_rts",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rta_ctl_flags",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_freelist": {
+   "kind": "struct",
+   "size": 64,
+   "members": [
+    {
+     "name": "freelist_dev_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "current_dev_addr",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "current_stack_top",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "max_pages",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "grow_pages",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "current_pages",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "allocated_page_count",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "allocated_mmu_page_count",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freelist_id",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "grow_pending",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "ready_pages",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freelist_flags",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pm_global_pb",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwrtdata_common": {
+   "kind": "struct",
+   "size": 88,
+   "members": [
+    {
+     "name": "geom_caches_need_zeroing",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "screen_pixel_max",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "multi_sample_ctl",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "flipped_multi_sample_ctl",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "tpc_stride",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tpc_size",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "te_screen",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "mtile_stride",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "teaa",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "te_mtile1",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "te_mtile2",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_lower_x",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_lower_y",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_upper_x",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_upper_y",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_scale_x",
+     "offset": 68,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_merge_scale_y",
+     "offset": 72,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rgn_header_size",
+     "offset": 76,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_mtile_size",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 84,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_hwrtdata": {
+   "kind": "struct",
+   "size": 384,
+   "members": [
+    {
+     "name": "pm_mlist_dev_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "vce_cat_base",
+     "offset": 8,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "vce_last_cat_base",
+     "offset": 40,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "te_cat_base",
+     "offset": 72,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "te_last_cat_base",
+     "offset": 104,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "alist_cat_base",
+     "offset": 136,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "alist_last_cat_base",
+     "offset": 144,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pm_alist_stack_pointer",
+     "offset": 152,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pm_mlist_stack_pointer",
+     "offset": 160,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwrt_data_common_fw_addr",
+     "offset": 164,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwrt_data_flags",
+     "offset": 168,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "state",
+     "offset": 172,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_rtdata_state",
+      "size": 4
+     }
+    },
+    {
+     "name": "freelists_fw_addr",
+     "offset": 176,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 12
+     }
+    },
+    {
+     "name": "freelist_hwr_snapshot",
+     "offset": 188,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 12
+     }
+    },
+    {
+     "name": "vheap_table_dev_addr",
+     "offset": 200,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "rta_ctl",
+     "offset": 208,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_rta_ctl",
+      "size": 32,
+      "die_offset": 11413
+     }
+    },
+    {
+     "name": "tail_ptrs_dev_addr",
+     "offset": 240,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "macrotile_array_dev_addr",
+     "offset": 248,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "rgn_header_dev_addr",
+     "offset": 256,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "rtc_dev_addr",
+     "offset": 264,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "owner_geom_not_used_by_host",
+     "offset": 272,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "geom_caches_need_zeroing",
+     "offset": 276,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "cleanup_state",
+     "offset": 320,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cleanup_ctl",
+      "size": 8,
+      "die_offset": 1466
+     }
+    }
+   ]
+  },
+  "rogue_fwif_geom_regs": {
+   "kind": "struct",
+   "size": 64,
+   "members": [
+    {
+     "name": "vdm_ctrl_stream_base",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "tpu_border_colour_table",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "vdm_draw_indirect0",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "vdm_draw_indirect1",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "ppp_ctrl",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "te_psg",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tpu",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "vdm_context_resume_task0_size",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "vdm_context_resume_task3_size",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pds_ctrl",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "view_idx",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pds_coeff_free_prog",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_dummy_rgnhdr_init_geom_regs": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "te_psgregion_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_geom": {
+   "kind": "struct",
+   "size": 112,
+   "members": [
+    {
+     "name": "cmd_shared",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cmd_geom_frag_shared",
+      "size": 16,
+      "die_offset": 1531
+     }
+    },
+    {
+     "name": "regs",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_geom_regs",
+      "size": 64,
+      "die_offset": 12508
+     }
+    },
+    {
+     "name": "flags",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "partial_render_geom_frag_fence",
+     "offset": 84,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_ufo",
+      "size": 8,
+      "die_offset": 1388
+     }
+    },
+    {
+     "name": "dummy_rgnhdr_init_geom_regs",
+     "offset": 96,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_dummy_rgnhdr_init_geom_regs",
+      "size": 8,
+      "die_offset": 12690
+     }
+    },
+    {
+     "name": "brn61484_66333_live_rt",
+     "offset": 104,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 108,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_frag_regs": {
+   "kind": "struct",
+   "size": 448,
+   "members": [
+    {
+     "name": "usc_pixel_output_ctrl",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_clear_register",
+     "offset": 4,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "unsigned int",
+       "size": 4,
+       "typedef": "__uint32_t"
+      },
+      "dims": [
+       8
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "isp_bgobjdepth",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_bgobjvals",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_aa",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_xtp_pipe_enable",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_ctl",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tpu",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_pixel_pds_info",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pixel_phantom",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "view_idx",
+     "offset": 68,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_pixel_pds_data",
+     "offset": 72,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "brn65101_event_pixel_pds_data",
+     "offset": 76,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_oclqry_stride",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_zls_pixels",
+     "offset": 84,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rgx_cr_blackpearl_fix",
+     "offset": 88,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_scissor_base",
+     "offset": 96,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_dbias_base",
+     "offset": 104,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_oclqry_base",
+     "offset": 112,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_zlsctl",
+     "offset": 120,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_zload_store_base",
+     "offset": 128,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_stencil_load_store_base",
+     "offset": 136,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "fb_cdc_zls",
+     "offset": 144,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pbe_word",
+     "offset": 152,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       8,
+       3
+      ],
+      "size": 192
+     }
+    },
+    {
+     "name": "tpu_border_colour_table",
+     "offset": 344,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pds_bgnd",
+     "offset": 352,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 24
+     }
+    },
+    {
+     "name": "pds_bgnd_brn65101",
+     "offset": 376,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 24
+     }
+    },
+    {
+     "name": "pds_pr_bgnd",
+     "offset": 400,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       3
+      ],
+      "size": 24
+     }
+    },
+    {
+     "name": "isp_dummy_stencil_store_base",
+     "offset": 424,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_dummy_depth_store_base",
+     "offset": 432,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "rgnhdr_single_rt_size",
+     "offset": 440,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "rgnhdr_scratch_offset",
+     "offset": 444,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_frag": {
+   "kind": "struct",
+   "size": 480,
+   "members": [
+    {
+     "name": "cmd_shared",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cmd_geom_frag_shared",
+      "size": 16,
+      "die_offset": 1531
+     }
+    },
+    {
+     "name": "regs",
+     "offset": 16,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_frag_regs",
+      "size": 448,
+      "die_offset": 12823
+     }
+    },
+    {
+     "name": "flags",
+     "offset": 464,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "zls_stride",
+     "offset": 468,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "sls_stride",
+     "offset": 472,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "execute_count",
+     "offset": 476,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_compute_regs": {
+   "kind": "struct",
+   "size": 72,
+   "members": [
+    {
+     "name": "tpu_border_colour_table",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdm_cb_queue",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdm_cb_base",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdm_cb",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdm_ctrl_stream_base",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "cdm_context_state_base_addr",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "tpu",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cdm_resume_pds1",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cdm_item",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "compute_cluster",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tpu_tag_cdm_ctrl",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 68,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_compute": {
+   "kind": "struct",
+   "size": 96,
+   "members": [
+    {
+     "name": "common",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cmd_common",
+      "size": 4,
+      "die_offset": 1505
+     }
+    },
+    {
+     "name": "regs",
+     "offset": 8,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_compute_regs",
+      "size": 72,
+      "die_offset": 13388
+     }
+    },
+    {
+     "name": "flags",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "num_temp_regions",
+     "offset": 84,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "stream_start_offset",
+     "offset": 88,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "execute_count",
+     "offset": 92,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_fwif_transfer_regs": {
+   "kind": "struct",
+   "size": 176,
+   "members": [
+    {
+     "name": "isp_bgobjvals",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_pixel_output_ctrl",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_clear_register0",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_clear_register1",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_clear_register2",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "usc_clear_register3",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_mtile_size",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_render_origin",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_ctl",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_xtp_pipe_enable",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_aa",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_pixel_pds_info",
+     "offset": 44,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_pixel_pds_code",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "event_pixel_pds_data",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_render",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "isp_rgn",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "frag_screen",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pds_bgnd0_base",
+     "offset": 72,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pds_bgnd1_base",
+     "offset": 80,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pds_bgnd3_sizeinfo",
+     "offset": 88,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "isp_mtile_base",
+     "offset": 96,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pbe_wordx_mrty",
+     "offset": 104,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       9
+      ],
+      "size": 72
+     }
+    }
+   ]
+  },
+  "rogue_fwif_cmd_transfer": {
+   "kind": "struct",
+   "size": 192,
+   "members": [
+    {
+     "name": "common",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cmd_common",
+      "size": 4,
+      "die_offset": 1505
+     }
+    },
+    {
+     "name": "regs",
+     "offset": 8,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_transfer_regs",
+      "size": 176,
+      "die_offset": 13671
+     }
+    },
+    {
+     "name": "flags",
+     "offset": 184,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "padding",
+     "offset": 188,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_mipsfw_boot_data": {
+   "kind": "struct",
+   "size": 64,
+   "members": [
+    {
+     "name": "stack_phys_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "reg_base",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "pt_phys_addr",
+     "offset": 16,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "long unsigned int",
+       "size": 8,
+       "typedef": "__uint64_t"
+      },
+      "dims": [
+       4
+      ],
+      "size": 32
+     }
+    },
+    {
+     "name": "pt_log2_page_size",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "pt_num_pages",
+     "offset": 52,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reserved1",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "reserved2",
+     "offset": 60,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_mips_tlb_entry": {
+   "kind": "struct",
+   "size": 16,
+   "members": [
+    {
+     "name": "tlb_page_mask",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tlb_hi",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tlb_lo0",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tlb_lo1",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_mips_remap_entry": {
+   "kind": "struct",
+   "size": 12,
+   "members": [
+    {
+     "name": "remap_addr_in",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "remap_addr_out",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "remap_region_size",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "rogue_mips_state": {
+   "kind": "struct",
+   "size": 684,
+   "members": [
+    {
+     "name": "error_state",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "error_epc",
+     "offset": 4,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "status_register",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "cause_register",
+     "offset": 12,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bad_register",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "epc",
+     "offset": 20,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "sp",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "debug",
+     "offset": 28,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "depc",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "bad_instr",
+     "offset": 36,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "unmapped_address",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "tlb",
+     "offset": 44,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_mips_tlb_entry",
+       "size": 16,
+       "die_offset": 14801
+      },
+      "dims": [
+       16
+      ],
+      "size": 256
+     }
+    },
+    {
+     "name": "remap",
+     "offset": 300,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "struct",
+       "name": "rogue_mips_remap_entry",
+       "size": 12,
+       "die_offset": 14871
+      },
+      "dims": [
+       32
+      ],
+      "size": 384
+     }
+    }
+   ]
+  }
+ },
+ "anon": {
+  "494": {
+   "kind": "struct",
+   "size": 8,
+   "members": [
+    {
+     "name": "__val",
+     "offset": 0,
+     "type": {
+      "kind": "array",
+      "elem": {
+       "kind": "base",
+       "name": "int",
+       "size": 4
+      },
+      "dims": [
+       2
+      ],
+      "size": 8
+     }
+    }
+   ]
+  },
+  "1716": {
+   "kind": "struct",
+   "size": 80,
+   "members": [
+    {
+     "name": "geom_reg_vdm_context_store_task0",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_store_task1",
+     "offset": 8,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_store_task2",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_resume_task0",
+     "offset": 24,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_resume_task1",
+     "offset": 32,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_resume_task2",
+     "offset": 40,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_store_task3",
+     "offset": 48,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_store_task4",
+     "offset": 56,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_resume_task3",
+     "offset": 64,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    },
+    {
+     "name": "geom_reg_vdm_context_resume_task4",
+     "offset": 72,
+     "type": {
+      "kind": "base",
+      "name": "long unsigned int",
+      "size": 8,
+      "typedef": "__uint64_t"
+     }
+    }
+   ]
+  },
+  "2435": {
+   "kind": "struct",
+   "size": 32,
+   "members": [
+    {
+     "name": "__max_align_ll",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "long long int",
+      "size": 8
+     }
+    },
+    {
+     "name": "__max_align_ld",
+     "offset": 16,
+     "type": {
+      "kind": "base",
+      "name": "long double",
+      "size": 16
+     }
+    }
+   ]
+  },
+  "4153": {
+   "kind": "union",
+   "size": 32,
+   "members": [
+    {
+     "name": "bif_info",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_bifinfo",
+      "size": 32,
+      "die_offset": 3846
+     }
+    },
+    {
+     "name": "mmu_info",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_mmuinfo",
+      "size": 32,
+      "die_offset": 3949
+     }
+    },
+    {
+     "name": "poll_info",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_pollinfo",
+      "size": 24,
+      "die_offset": 4025
+     }
+    },
+    {
+     "name": "tlb_info",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_tlbinfo",
+      "size": 8,
+      "die_offset": 4111
+     }
+    },
+    {
+     "name": "ecc_info",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_eccinfo",
+      "size": 4,
+      "die_offset": 3921
+     }
+    }
+   ]
+  },
+  "6455": {
+   "kind": "union",
+   "size": 4,
+   "members": [
+    {
+     "name": "context_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "hwrt_data_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "freelist_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "zs_buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    }
+   ]
+  },
+  "6632": {
+   "kind": "union",
+   "size": 4,
+   "members": [
+    {
+     "name": "num_of_dusts",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "forced",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "_Bool",
+      "size": 1
+     }
+    },
+    {
+     "name": "pow_request_type",
+     "offset": 0,
+     "type": {
+      "kind": "enum",
+      "name": "rogue_fwif_power_force_idle_type",
+      "size": 4
+     }
+    }
+   ]
+  },
+  "8228": {
+   "kind": "union",
+   "size": 80,
+   "members": [
+    {
+     "name": "cmd_kick_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_kccb_cmd_kick_data",
+      "size": 32,
+      "die_offset": 6216
+     }
+    },
+    {
+     "name": "combined_geom_frag_cmd_kick_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_kccb_cmd_combined_geom_frag_kick_data",
+      "size": 64,
+      "die_offset": 6330
+     }
+    },
+    {
+     "name": "mmu_cache_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_mmucachedata",
+      "size": 12,
+      "die_offset": 6035
+     }
+    },
+    {
+     "name": "bp_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_bpdata",
+      "size": 32,
+      "die_offset": 6091
+     }
+    },
+    {
+     "name": "slc_flush_inval_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_slcflushinvaldata",
+      "size": 32,
+      "die_offset": 6723
+     }
+    },
+    {
+     "name": "cleanup_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_cleanup_request",
+      "size": 8,
+      "die_offset": 6514
+     }
+    },
+    {
+     "name": "pow_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_power_request",
+      "size": 8,
+      "die_offset": 6679
+     }
+    },
+    {
+     "name": "hw_perf_ctrl",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_hwperf_ctrl",
+      "size": 16,
+      "die_offset": 6847
+     }
+    },
+    {
+     "name": "hw_perf_cfg_enable_blks",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_hwperf_config_enable_blks",
+      "size": 8,
+      "die_offset": 6891
+     }
+    },
+    {
+     "name": "hw_perf_ctrl_blks",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_hwperf_ctrl_blks",
+      "size": 40,
+      "die_offset": 7003
+     }
+    },
+    {
+     "name": "hw_perf_select_cstm_cntrs",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_hwperf_select_custom_cntrs",
+      "size": 8,
+      "die_offset": 7075
+     }
+    },
+    {
+     "name": "hw_perf_cfg_da_blks",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_hwperf_config_da_blks",
+      "size": 8,
+      "die_offset": 6933
+     }
+    },
+    {
+     "name": "core_clk_speed_change_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_coreclkspeedchange_data",
+      "size": 4,
+      "die_offset": 6975
+     }
+    },
+    {
+     "name": "zs_buffer_backing_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_zsbuffer_backing_data",
+      "size": 8,
+      "die_offset": 7131
+     }
+    },
+    {
+     "name": "free_list_gs_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_freelist_gs_data",
+      "size": 16,
+      "die_offset": 7175
+     }
+    },
+    {
+     "name": "free_lists_reconstruction_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_freelists_reconstruction_data",
+      "size": 76,
+      "die_offset": 7245
+     }
+    },
+    {
+     "name": "reg_config_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_regconfig_data",
+      "size": 32,
+      "die_offset": 7669
+     }
+    },
+    {
+     "name": "write_offset_update_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_write_offset_update_data",
+      "size": 8,
+      "die_offset": 7303
+     }
+    },
+    {
+     "name": "pdvfs_max_freq_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_pdvfs_max_freq_data",
+      "size": 8,
+      "die_offset": 7449
+     }
+    },
+    {
+     "name": "pdvfs_min_freq_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_pdvfs_min_freq_data",
+      "size": 8,
+      "die_offset": 7478
+     }
+    },
+    {
+     "name": "cmd_os_online_state_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_os_state_change_data",
+      "size": 8,
+      "die_offset": 7834
+     }
+    },
+    {
+     "name": "tbi_buffer_fw_addr",
+     "offset": 0,
+     "type": {
+      "kind": "base",
+      "name": "unsigned int",
+      "size": 4,
+      "typedef": "__uint32_t"
+     }
+    },
+    {
+     "name": "counter_dump_config_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_counter_dump_data",
+      "size": 8,
+      "die_offset": 7912
+     }
+    },
+    {
+     "name": "force_update_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_kccb_cmd_force_update_data",
+      "size": 8,
+      "die_offset": 6372
+     }
+    }
+   ]
+  },
+  "9093": {
+   "kind": "union",
+   "size": 80,
+   "members": [
+    {
+     "name": "cmd_zs_buffer_backing",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_zsbuffer_backing_data",
+      "size": 4,
+      "die_offset": 8594
+     }
+    },
+    {
+     "name": "cmd_free_list_gs",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_freelist_gs_data",
+      "size": 4,
+      "die_offset": 8622
+     }
+    },
+    {
+     "name": "cmd_freelists_reconstruction",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_freelists_reconstruction_data",
+      "size": 80,
+      "die_offset": 8650
+     }
+    },
+    {
+     "name": "cmd_context_reset_notification",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_context_reset_data",
+      "size": 40,
+      "die_offset": 8706
+     }
+    },
+    {
+     "name": "cmd_update_stats_data",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_update_stats_data",
+      "size": 12,
+      "die_offset": 9008
+     }
+    },
+    {
+     "name": "cmd_core_clk_rate_change",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_core_clk_rate_change_data",
+      "size": 8,
+      "die_offset": 9064
+     }
+    },
+    {
+     "name": "cmd_fw_pagefault",
+     "offset": 0,
+     "type": {
+      "kind": "struct",
+      "name": "rogue_fwif_fwccb_cmd_fw_pagefault_data",
+      "size": 8,
+      "die_offset": 8820
+     }
+    }
+   ]
+  }
+ }
+}
