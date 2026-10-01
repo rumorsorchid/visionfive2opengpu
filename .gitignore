@@ -5,3 +5,8 @@ __pycache__/
 *.log
 vf2-gpu-report-*.txt
 bench-*.txt
+/openfw/*.o
+/openfw/openfw.elf
+/openfw/openfw.map
+/openfw/openfw.dis
+/openfw/rogue_*.fw

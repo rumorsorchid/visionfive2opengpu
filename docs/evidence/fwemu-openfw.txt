@@ -1,0 +1,96 @@
+$ fwemu.py openfw/rogue_36.50.54.182_v1.fw --kernel linux --kccb health --kccb mmucache --kccb logtype --kccb pow-idle --kccb pow-off --kccb reboot --kccb health
+found 1 swm sites (Unicorn SWM workaround)
+patched 10 TLB instructions: tlbwi@9fc0209c, tlbwi@9fc0289e, tlbp@9fc02932, tlbwi@9fc029c8, tlbwi@bfc001f8, tlbwi@bfc00266, tlbwi@bfc002dc, tlbwi@bfc0034e, tlbwi@bfc00422, tlbwi@bfc0046c
+
+executed 1090 instructions; firmware_started=1
+last PCs: c0000094 c0000096 c0000098 c000009a c000009c c0000644 c0000646 c000064a c000064e c0000652 c0000656 c000065a c000065e c0000662 c0000666 c000066a
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=1  osdata: kccb_cmds_executed=0  power_sync=0
+register writes: 79 (15 distinct registers), reads: 17
+firmware trace:
+  [40] Initialised Firmware with config flags 0x00000000 and extended config flags 0x00000000
+  [48] Initialised OS 0 with config flags 0x00000000
+  [56] Core clock set to 409600000 Hz
+  [63] GPU init
+
+== KCCB health -> slot 0, MTS kick, background-task interrupt
+  bg irq handled in 563 instructions, stopped at 0x9fc0285e
+  kccb read_offset=1 rtn[0]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=3  osdata: kccb_cmds_executed=1  power_sync=0
+register writes: 81 (17 distinct registers), reads: 27
+firmware trace:
+  [73] Bg Task OSid = 0
+  [82] KCCB Slot 0: Cmd=0x2abc0073, OSid=0
+  [92] KCCB Slot 0: Return value 1
+
+== KCCB mmucache -> slot 1, MTS kick, background-task interrupt
+  bg irq handled in 851 instructions, stopped at 0x9fc0285e
+  kccb read_offset=2 rtn[1]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=3  osdata: kccb_cmds_executed=2  power_sync=0
+register writes: 129 (19 distinct registers), reads: 40
+firmware trace:
+  [108] Bg Task OSid = 0
+  [117] KCCB Slot 1: Cmd=0x2abc0066, OSid=0
+  [145] KCCB Slot 1: Return value 1
+
+== KCCB logtype -> slot 2, MTS kick, background-task interrupt
+  bg irq handled in 805 instructions, stopped at 0x9fc0285e
+  kccb read_offset=3 rtn[2]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=3  osdata: kccb_cmds_executed=3  power_sync=0
+register writes: 175 (19 distinct registers), reads: 51
+firmware trace:
+  [162] Bg Task OSid = 0
+  [170] KCCB Slot 2: Cmd=0x2abc00ce, OSid=0
+  [195] KCCB Slot 2: Return value 1
+
+== KCCB pow-idle -> slot 3, MTS kick, background-task interrupt
+  bg irq handled in 680 instructions, stopped at 0x9fc0285e
+  kccb read_offset=4 rtn[3]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=2  osdata: kccb_cmds_executed=4  power_sync=1
+register writes: 177 (19 distinct registers), reads: 64
+firmware trace:
+  [212] Bg Task OSid = 0
+  [220] KCCB Slot 3: Cmd=0x2abc006b, OSid=0
+  [230] OS requested forced IDLE, pow flags: 0x0
+  [238] KCCB Slot 3: Return value 1
+
+== KCCB pow-off -> slot 4, MTS kick, background-task interrupt
+  bg irq: core parked in `wait` with interrupts disabled at 0xc00000b4 after 789 instructions
+  kccb read_offset=5 rtn[4]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=0  osdata: kccb_cmds_executed=5  power_sync=1
+register writes: 181 (19 distinct registers), reads: 82
+firmware trace:
+  [254] Bg Task OSid = 0
+  [263] KCCB Slot 4: Cmd=0x2abc006b, OSid=0
+  [273] OS requested pow off (forced = 1), pow flags: 0x0
+  [283] GPU deinit
+  [290] KCCB Slot 4: Return value 1
+
+== reboot (runtime resume)
+
+executed 1090 instructions; firmware_started=1
+last PCs: c0000094 c0000096 c0000098 c000009a c000009c c0000644 c0000646 c000064a c000064e c0000652 c0000656 c000065a c000065e c0000662 c0000666 c000066a
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=1  osdata: kccb_cmds_executed=5  power_sync=1
+register writes: 260 (19 distinct registers), reads: 99
+firmware trace:
+  [339] Initialised Firmware with config flags 0x00000000 and extended config flags 0x00000000
+  [347] Initialised OS 0 with config flags 0x00000000
+  [355] Core clock set to 409600000 Hz
+  [362] GPU init
+
+== KCCB health -> slot 5, MTS kick, background-task interrupt
+  bg irq handled in 563 instructions, stopped at 0x9fc0285e
+  kccb read_offset=6 rtn[5]=0x1
+connection: fw_state=2 os_state=0 alive_fw_token=0
+sysdata: pow_state=3  osdata: kccb_cmds_executed=6  power_sync=1
+register writes: 262 (19 distinct registers), reads: 109
+firmware trace:
+  [372] Bg Task OSid = 0
+  [380] KCCB Slot 5: Cmd=0x2abc0073, OSid=0
+  [390] KCCB Slot 5: Return value 1

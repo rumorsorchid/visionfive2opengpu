@@ -43,10 +43,13 @@ entries), booting in **microMIPS** mode. Practical consequences:
   Capstone 5's microMIPS decoder misses CP0 instructions.
 * GCC (`mipsel-linux-gnu-gcc -march=mips32r2 -mmicromips`) can target it,
   so an open firmware needs no exotic toolchain.
-* Unicorn 2 (QEMU M14Kc model) executes the boot code, with one QEMU bug
-  to work around: microMIPS `jal` targets the 128 MiB region given by PC
-  bits 31:27, but QEMU masks with 31:28, so jumps from `0xbfc0xxxx` land
-  in `0xb7c0xxxx`. Aliasing those physical pages fixes it.
+* Unicorn 2 runs it. `tools/fwemu` uses the fixed-mapping M14K model
+  (Unicorn never delivers TLB refills to the guest); `openfw/test_mmu.py`
+  uses the TLB-equipped M14Kc model to run TLB code directly. QEMU bugs to
+  work around: microMIPS `jal` targets the 128 MiB region given by PC bits
+  31:27, but QEMU masks with 31:28 (alias the pages); `swm` stores only 16
+  bits per register; code rewritten at the same address needs
+  `ctl_remove_cache`.
 
 ## What it does (static analysis)
 
@@ -67,6 +70,36 @@ The assert strings name ten source files: `rgxfw_init.c`,
   `POWER_EVENT` (7 write sites, routine at `0xc000a690`) and tests the
   `POW_RASCALDUST` config bit at 15 sites. That is what led to the
   `rd_power_island` experiment, see [power.md](power.md).
+
+## Runtime protocol (from tracing the reference in fwemu)
+
+* **Memory.** Boot code wires five TLB entries (register bank as one 4 MiB
+  page, the four page-table pages, the stack, the first two private-data
+  pages), sets `Wired = 5` and invalidates the rest. Every other access
+  goes through the TLB refill handler, which maps the page pair *identity*
+  (virtual = MIPS physical) with the flags of the kernel's page-table
+  entries and points two wrapper remap ranges (`Random`, `Random + 16`) at
+  the system pages. `MMUCACHE` and `LOGTYPE_UPDATE` flush the non-wired
+  TLB entries and their remap ranges.
+* **Tasks.** Vectored interrupts at EBase `0x9FC02000`: IP2 CP0 timer
+  (`0x400`), IP3 MTS background task (`0x500`, kernel CCB), IP4 MTS
+  interrupt task (`0x600`, GPU events). A task ends by writing the unnamed
+  register `0xB08` (`0` background, `2` interrupt task) and reading it
+  back. The firmware queues its own tasks through `MTS_SCHEDULE`
+  (`0x20` = interrupt task, `0x0` = background task); the background
+  self-kick is how forced idle and power-off complete.
+* **Host interrupt.** `MIPS_WRAPPER_IRQ_STATUS = 1`, raised after the
+  return slot is written.
+* **Return slots.** Set (`CMD_EXECUTED`) for the commands the kernel waits
+  on (MMU cache, log type, cleanup); left at 0 for health checks and power
+  requests, which the kernel tracks through `kccb_cmds_executed` and
+  `power_sync`.
+* **Power.** Health check → idle timer → `pow_state = IDLE`. Forced idle →
+  `FORCED_IDLE`, `power_sync = 1`. Power off → "GPU units deinit / GPU
+  deinit", SLC flush of MMU data (`SLC_CTRL_FLUSH_INVAL = 0x10`), page
+  catalogue invalidate (`BIF_CTRL_INVAL = 0x4`), `pow_state = OFF`,
+  `power_sync = 1`, then `di; wait`. On runtime resume the kernel reboots
+  the same image; the kernel CCB continues where it stopped.
 
 ## A fully open firmware: honest assessment
 
@@ -98,11 +131,13 @@ would be the first open PowerVR Rogue firmware.
    requests) and runs a complete **compute job** (kick → "Kick Compute" →
    completion → "Compute finished"). That is the executable specification
    and test bench for M0–M2 of a replacement. Next: geometry/fragment.
-2. **M0 – boot handshake.** An open image in the same container format
-   that boots, reports its OS state as active and answers health checks.
-   The upstream driver then probes and stays up with no jobs submitted.
-3. **M1 – kernel CCB.** MMU cache invalidation, cleanup requests, power
-   requests.
+2. **M0 – boot handshake** — *done in emulation*: [`openfw/`](../openfw/README.md)
+   boots, reports active and answers health checks.
+3. **M1 – kernel CCB** — *done in emulation*: MMU cache invalidation,
+   cleanup, log type, forced idle, power off, resume. `openfw` and
+   Imagination's image both pass the 25-step `test_contract.py`; the TLB
+   code passes `test_mmu.py`. Waiting for the first board run
+   (`board/openfw-test.sh`).
 4. **M2 – compute/transfer.** Single data master, UFO fence check/update,
    completion interrupt. First real jobs (Vulkan compute, blits).
 5. **M3 – geometry + fragment.** Parameter manager, free lists, partial
