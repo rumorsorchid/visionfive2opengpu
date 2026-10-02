@@ -25,6 +25,13 @@
 #define ISP_RENDER_MODE_MASK		3u
 #define ISP_RENDER_MODE_FAST_2D		2u
 
+#define ISP_AA_MODE_MASK		3u
+#define ISP_ZLSCTL_FORCEZSTORE		(1u << 2)
+
+/* rogue_fwif_cmd_frag.flags (pvr_rogue_fwif_client.h) */
+#define FRAG_FLAGS_GET_VIS_RESULTS	(1u << 5)
+#define FRAG_FLAGS_DISABLE_PIXELMERGE	(1u << 15)
+
 #define CDM_CTX(r) OFF_FWCOMPUTECONTEXT_STATIC_COMPUTE_CONTEXT_STATE_CTXSWITCH_REGS_CDMREG_CDM_##r
 
 static inline void copy32(u32 reg, u32 addr)
@@ -125,6 +132,8 @@ void kick_tq(struct job *j)
 	reg_write(0x0FD8, tiles_in_flight(isp_ctl));
 	reg_write(0x0F38, isp_ctl);
 	copy32(0x0F30, p + OFF_CMD_TRANSFER_REGS_ISP_AA);
+	if (FW32(p + OFF_CMD_TRANSFER_REGS_ISP_AA) & ISP_AA_MODE_MASK)
+		reg_write64(0x0FA8, 0x8888888888888888ull);	/* samples at the pixel centre */
 	reg_write64(0x0F48, 0);			/* no depth/stencil load/store */
 	copy32(0x0628, p + OFF_CMD_TRANSFER_REGS_EVENT_PIXEL_PDS_INFO);
 	copy32(0x0618, p + OFF_CMD_TRANSFER_REGS_EVENT_PIXEL_PDS_CODE);
@@ -410,6 +419,7 @@ void kick_geom(struct job *j)
 	u32 c = FW32(h + OFF_HWRTDATA_HWRT_DATA_COMMON_FW_ADDR);
 	u32 st = FW32(j->ctx + OFF_FWCOMMONCONTEXT_CONTEXT_STATE_ADDR);
 	u32 flags = FW32(p + OFF_CMD_GEOM_FLAGS);
+	int first = flags & GEOM_FLAGS_FIRSTKICK;
 	u64 v;
 
 	/* PM context 0 is about to be reused: keep what it built for a
@@ -426,24 +436,30 @@ void kick_geom(struct job *j)
 			pm_load_freelist(0, k, fl);
 	}
 	pm_set_pb_base();
-	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
-
-	/* PM context 0: MLIST and page catalogues of this render target. The
-	 * catalogues are left alone while another render's geometry output
-	 * still waits for its 3D pass (as the reference firmware does). */
-	copy64(0x02D8, h + OFF_HWRTDATA_PM_MLIST_DEV_ADDR);
-	if (!pm_pending_hwrt || pm_pending_hwrt == h) {
-		copy64(CR_BIF_PM_CAT_BASE_VCE0, h + OFF_HWRTDATA_VCE_CAT_BASE0);
-		copy64(CR_BIF_PM_CAT_BASE_TE0, h + OFF_HWRTDATA_TE_CAT_BASE0);
-		copy64(CR_BIF_PM_CAT_BASE_ALIST0, h + OFF_HWRTDATA_ALIST_CAT_BASE);
+	if (first) {
+		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+		/* PM context 0: MLIST and page catalogues of this render
+		 * target. The catalogues are left alone while another render's
+		 * geometry output still waits for its 3D pass (as the
+		 * reference firmware does). */
+		copy64(0x02D8, h + OFF_HWRTDATA_PM_MLIST_DEV_ADDR);
+		if (!pm_pending_hwrt || pm_pending_hwrt == h) {
+			copy64(CR_BIF_PM_CAT_BASE_VCE0, h + OFF_HWRTDATA_VCE_CAT_BASE0);
+			copy64(CR_BIF_PM_CAT_BASE_TE0, h + OFF_HWRTDATA_TE_CAT_BASE0);
+			copy64(CR_BIF_PM_CAT_BASE_ALIST0, h + OFF_HWRTDATA_ALIST_CAT_BASE);
+		}
 	}
+	/* VHEAP table: initialised by a first kick, reloaded by the next ones
+	 * (finish_geom stores it after a kick that is not the last) */
 	copy64(0x0248, h + OFF_HWRTDATA_VHEAP_TABLE_DEV_ADDR);
-	reg_write(0x0258, 1);
-	poll_reg(0x0258, 1, 0);
-	v = reg_read64(0x03D0);
-	reg_write64(0x03D0, v);
-	reg_write(0x0290, 1);
-	reg_write(0x0198, 1);
+	reg_write(first ? 0x0258 : 0x0250, 1);
+	poll_reg(first ? 0x0258 : 0x0250, 1, 0);
+	if (first) {
+		v = reg_read64(0x03D0);
+		reg_write64(0x03D0, v);
+		reg_write(0x0290, 1);
+		reg_write(0x0198, 1);
+	}
 
 	/* tiling engine */
 	copy32(0x0C88, p + OFF_CMD_GEOM_REGS_PPP_CTRL);
@@ -463,11 +479,14 @@ void kick_geom(struct job *j)
 	copy32(0x0C48, c + OFF_HWRTDATA_COMMON_TPC_STRIDE);
 	reg_write(0x0CE0, 0);
 	reg_write(0x0CB8, 1);
-	reg_write(0x0D20, 0);
+	/* render target array: active layers so far in this render */
+	reg_write(0x0D20, first ? 0 : FW32(h + OFF_HWRTDATA_RTA_CTL_ACTIVE_RENDER_TARGETS));
 	reg_write(0x40A8, 0);
 	reg_write(0x40A8, 0);
-	reg_write(0x0C68, 1);
-	poll_reg(0x0C68, 1, 0);
+	if (first) {
+		reg_write(0x0C68, 1);		/* region header init */
+		poll_reg(0x0C68, 1, 0);
+	}
 
 	/* vertex data master */
 	copy64(0x0408, p + OFF_CMD_GEOM_REGS_VDM_CTRL_STREAM_BASE);
@@ -489,9 +508,17 @@ void kick_geom(struct job *j)
 void finish_geom(struct job *j)
 {
 	u32 h = j->hwrt;
+	int last = FW32(j->payload + OFF_CMD_GEOM_FLAGS) & GEOM_FLAGS_LASTKICK;
 
 	TRACE(SF_OPENFW_TA_DONE);
 	reg_write(CR_EVENT_CLEAR, EVENT_TA_FINISHED);
+	if (!last) {
+		/* more geometry kicks follow: keep the VHEAP table and the
+		 * render target array state for them */
+		reg_write(0x0260, 1);
+		poll_reg(0x0260, 1, 0);
+		FW32(h + OFF_HWRTDATA_RTA_CTL_ACTIVE_RENDER_TARGETS) = reg_read(0x0D20);
+	}
 	/* tail pointer cache flush */
 	reg_write(0x0C50, 0x40000000);
 	reg_write(0x0CB8, 2);
@@ -501,7 +528,8 @@ void finish_geom(struct job *j)
 	pm_pending_hwrt = h;	/* its PM state is stored when the 3D takes it */
 	pm_pending_stored = 0;
 	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_GEOM_FINISHED;
-	FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING) = 0;
+	if (last)
+		FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING) = 0;
 }
 
 /* -- fragment ------------------------------------------------------------------ */
@@ -517,6 +545,7 @@ void kick_frag(struct job *j)
 	u32 p = j->payload, h = j->hwrt;
 	u32 c = FW32(h + OFF_HWRTDATA_HWRT_DATA_COMMON_FW_ADDR);
 	u32 isp_ctl = FW32(p + OFF_CMD_FRAG_REGS_ISP_CTL);
+	u32 flags = FW32(p + OFF_CMD_FRAG_FLAGS);
 
 	/*
 	 * Hand the geometry output over to the 3D: the HWRT data holds the
@@ -565,6 +594,8 @@ void kick_frag(struct job *j)
 	copy64(0x0FB8, p + OFF_CMD_FRAG_REGS_ISP_DBIAS_BASE);
 	copy32(0x0F80, p + OFF_CMD_FRAG_REGS_ISP_BGOBJDEPTH);
 	copy32(0x0F30, p + OFF_CMD_FRAG_REGS_ISP_AA);
+	if (flags & FRAG_FLAGS_GET_VIS_RESULTS)
+		copy64(0x0FC0, p + OFF_CMD_FRAG_REGS_ISP_OCLQRY_BASE);	/* occlusion queries */
 	reg_write(0x0F28, 0);
 	reg_write(0x0F08, 0);			/* ISP_RENDER: normal render */
 	reg_write(0x0618, 0x80);
@@ -585,7 +616,7 @@ void kick_frag(struct job *j)
 	copy64(0x0F58, p + OFF_CMD_FRAG_REGS_ISP_ZLOAD_STORE_BASE);
 	copy64(0x0F60, p + OFF_CMD_FRAG_REGS_ISP_STENCIL_LOAD_STORE_BASE);
 	copy64(0x0F68, p + OFF_CMD_FRAG_REGS_ISP_STENCIL_LOAD_STORE_BASE);
-	reg_write(0x06D0, 0x1F);
+	reg_write(0x06D0, (flags & FRAG_FLAGS_DISABLE_PIXELMERGE) ? 0x7F : 0x1F);
 	copy64(0x06A0, p + OFF_CMD_FRAG_REGS_PDS_BGND0);
 	copy64(0x06A8, p + OFF_CMD_FRAG_REGS_PDS_BGND1);
 	copy64(0x06B8, p + OFF_CMD_FRAG_REGS_PDS_BGND2);
@@ -606,8 +637,12 @@ void kick_frag(struct job *j)
 void finish_frag(struct job *j)
 {
 	u32 h = j->hwrt;
+	int zls_wait = FW32(j->payload + OFF_CMD_FRAG_REGS_ISP_ZLSCTL) & ISP_ZLSCTL_FORCEZSTORE;
 
 	(void)reg_read(0x0F08);
+	/* a forced depth store must have reached memory */
+	if (zls_wait)
+		poll_reg(CR_EVENT_STATUS, EVENT_ZLS_FINISHED, EVENT_ZLS_FINISHED);
 	/* the PM must have released the render's memory */
 	poll_reg(CR_EVENT_STATUS, EVENT_PM_3D_MEM_FREE, EVENT_PM_3D_MEM_FREE);
 	reg_write(CR_EVENT_CLEAR, EVENT_PM_3D_MEM_FREE);
@@ -616,7 +651,7 @@ void finish_frag(struct job *j)
 	if (!(sched_dm_busy(DM_GEOM) && pm_pending_hwrt))
 		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 	TRACE(SF_OPENFW_3D_DONE, 0x7FFFFFFFu, FW32(h + OFF_HWRTDATA_STATE));
-	reg_write(CR_EVENT_CLEAR, EVENT_PIXELBE_END_RENDER);
+	reg_write(CR_EVENT_CLEAR, EVENT_PIXELBE_END_RENDER | (zls_wait ? EVENT_ZLS_FINISHED : 0));
 	gpu_dm_fence(DM_FRAG);
 	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_FRAG_FINISHED;
 	FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) = 0;

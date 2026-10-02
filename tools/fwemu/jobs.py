@@ -55,8 +55,10 @@ from pvrfw import Firmware, Tables  # noqa: E402
 # of them into memory can be traced.
 STATUS_REGS = {
     "TA": [0x2000, 0x20c8, 0x20d8, 0x20e0, 0x348, 0x3a0, 0x274, 0x270, 0x2c0,
-           0x1248, 0x124c, 0x1250, 0x1254, 0x1260, 0x1264, 0xd20, 0x20b8, 0x20bc,
+           0x1248, 0x124c, 0x1250, 0x1254, 0x1260, 0x1264, 0x20b8, 0x20bc,
            0x210, 0x214],
+    # (0xd20, the TE's count of active render target array layers, stays
+    # 0: a single-layer render; layered renders are not modelled)
     "3D": [0x2008, 0x2088, 0x2098, 0x20a0, 0x350, 0x3a8, 0x284, 0x280, 0x2d0,
            0x1268, 0x126c, 0x1270, 0x1274, 0x1280, 0x1284, 0x2078, 0x207c, 0x218, 0x21c],
 }
@@ -399,13 +401,13 @@ def new_render(r, vm=None, data_sets=1):
     return ctx, fl, gfl, rts
 
 
-def render_jobs(r, ctx, hwrt, base, deps=()):
+def render_jobs(r, ctx, hwrt, base, deps=(), geom_flags=0x3):
     """Geometry + partial-render fragment (combined kick) and the fragment
     job, as pvr_queue builds them for one DRM_PVR_JOB_TYPE_GEOMETRY +
     FRAGMENT submission."""
     h = r.host
     gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
-    gvals = fields(r, "rogue_fwif_cmd_geom", base, {"flags": 0x3})
+    gvals = fields(r, "rogue_fwif_cmd_geom", base, {"flags": geom_flags})
     r.tag_fields("rogue_fwif_cmd_geom", gvals)
     gvals["cmd_shared.hwrt_data_fw_addr"] = hwrt
     geom = h.job(gq, H.CCB_GEOM, H.cmd(h.L, "rogue_fwif_cmd_geom", gvals), deps=deps, hwrt=hwrt)
@@ -683,6 +685,34 @@ def sc_oom_frames(r, n=3):
     return {"done": out, "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
 
 
+def sc_multikick(r, kicks=3):
+    """A render whose geometry comes in several kicks (Mesa splits a render
+    when its control stream fills up): FIRSTKICK, middle kicks, LASTKICK,
+    each paired with a partial-render fragment job; the fragment job
+    follows the last kick."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.mark("setup")
+    done = []
+    for k in range(kicks):
+        flags = (0x1 if k == 0 else 0) | (0x2 if k == kicks - 1 else 0)
+        geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0x10 * k, geom_flags=flags)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("geometry kick %d (flags %d)" % (k, flags))
+        done += [geom.done(), pr.done()]
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"done": done + [frag.done()], "geom_ufo": gq.ufo_value(), "frag_ufo": fq.ufo_value()}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -702,6 +732,7 @@ SCENARIOS = {
     "oom": sc_oom,
     "oom-live": sc_oom_live,
     "oom-frames": sc_oom_frames,
+    "multikick": sc_multikick,
 }
 
 

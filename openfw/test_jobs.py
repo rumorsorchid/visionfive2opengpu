@@ -22,6 +22,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tools", "fwemu"))
+import host as H  # noqa: E402
 import jobs  # noqa: E402
 import spec  # noqa: E402
 
@@ -50,6 +51,8 @@ CASES = [
     ("oom", "oom", {"oom": 1}),
     ("oom-status", "oom", {"oom": 1, "oom_regs": {0x20c8: 5, 0x20d8: 7, 0x20e0: 9,
                                                   0x348: 11, 0x3a0: 13, 0x2000: 15}}),
+    ("multikick", "multikick", {}),
+    ("multikick-status", "multikick", {"status_tags": 1}),
     ("oom-live", "oom-live", {"oom": 1}),
     ("oom-frames", "oom-frames", {}),
     ("oom-frames-status", "oom-frames", {"status_tags": 1}),
@@ -63,6 +66,33 @@ OUTCOME_CASES = [
     ("oom-twice", "oom", {"oom": 2}),
     ("oom-noready", "oom", {"oom": 1, "fl_threshold": 0}),
 ]
+
+
+# --sweep: every userspace command field (pvr_stream_defs.c) and the
+# kernel-set flags word, set to patterns that between them flip every bit.
+SWEEP_SCENARIO = {"rogue_fwif_cmd_compute": "compute", "rogue_fwif_cmd_transfer": "transfer",
+                  "rogue_fwif_cmd_geom": "render", "rogue_fwif_cmd_frag": "render"}
+SWEEP_VALUES = (0, 0xFFFFFFFF, 0x55555555, 0xAAAAAAAA)
+# flags bits pvr_job.c can set (convert_*_flags); the single-kick render
+# scenario keeps FIRSTKICK | LASTKICK (multi-kick has its own scenario)
+KERNEL_FLAGS = {"rogue_fwif_cmd_geom": (0x8, 0x3), "rogue_fwif_cmd_frag": (0x040881A8, 0),
+                "rogue_fwif_cmd_compute": (0xFFFFFFFF, 0),
+                "rogue_fwif_cmd_transfer": (0xFFFFFFFF, 0)}
+
+
+def sweep_cases():
+    for sname, sc in SWEEP_SCENARIO.items():
+        for field, bits in H.STREAM_FIELDS[sname] + [("flags", 32)]:
+            for v in SWEEP_VALUES:
+                if bits == 64:
+                    v |= v << 32
+                if field == "regs.isp_render" and (v & 3) < 2:
+                    continue        # Mesa only submits FAST_2D / FAST_SCALE transfers
+                if field == "flags":
+                    mask, fixed = KERNEL_FLAGS[sname]
+                    v = (v & mask) | fixed
+                yield ("%s.%s=%x" % (sname[11:], field, v), sc,
+                       {"override": {sname: {field: v}}})
 
 
 def run(fw, kernel, scenario, params):
@@ -146,6 +176,8 @@ def main():
     ap.add_argument("--kernel", required=True)
     ap.add_argument("-k", dest="only", action="append", help="run only cases containing NAME")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--sweep", action="store_true",
+                    help="also sweep every command field over bit patterns")
     args = ap.parse_args()
     ok = True
     for name, sc, params in CASES:
@@ -154,6 +186,17 @@ def main():
         a = run(args.openfw, args.kernel, sc, params)
         b = run(args.reference, args.kernel, sc, params)
         ok &= compare(name, a, b, args.verbose)
+    if args.sweep:
+        n = bad = 0
+        for name, sc, params in sweep_cases():
+            if args.only and not any(s in name for s in args.only):
+                continue
+            n += 1
+            if not compare(name, run(args.openfw, args.kernel, sc, params),
+                           run(args.reference, args.kernel, sc, params), args.verbose):
+                bad += 1
+        print("sweep: %d of %d field values match" % (n - bad, n))
+        ok &= not bad
     for name, sc, params in OUTCOME_CASES:
         if args.only and not any(s in name for s in args.only):
             continue
