@@ -50,6 +50,9 @@ CASES = [
     ("oom", "oom", {"oom": 1}),
     ("oom-status", "oom", {"oom": 1, "oom_regs": {0x20c8: 5, 0x20d8: 7, 0x20e0: 9,
                                                   0x348: 11, 0x3a0: 13, 0x2000: 15}}),
+    ("oom-live", "oom-live", {"oom": 1}),
+    ("oom-frames", "oom-frames", {}),
+    ("oom-frames-status", "oom-frames", {"status_tags": 1}),
 ]
 
 # Cases where openfw deliberately takes another route than the reference

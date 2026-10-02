@@ -300,33 +300,48 @@ static void pm_pause_ta_alloc(int pause)
 	poll_reg(0x02A8, 1, pause ? 1 : 0);
 }
 
-/* Add @pages pages below the current base of free list @fl in PM context 0. */
-static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
+/* Load free list @fl into PM context @c with @pages more pages at @base. */
+static void pm_fl_add(u32 c, u32 kind, u64 base, u32 pages)
 {
-	const struct pm_fl_regs *r = &pm_fl[0][kind];
-	u32 top = reg_read(pm_fl_status[0][kind].top) + pages;
-	u32 alloc = reg_read(pm_fl_status[0][kind].pages);
-	u32 mmu = reg_read(pm_fl_status[0][kind].mmu_pages);
-	u64 base = fw_read64(fl + OFF_FREELIST_CURRENT_DEV_ADDR) - (u64)pages * 4;
-	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES) + pages;
+	const struct pm_fl_regs *r = &pm_fl[c][kind];
+	u32 top = reg_read(pm_fl_status[c][kind].top) + pages;
+	u32 alloc = reg_read(pm_fl_status[c][kind].pages);
+	u32 mmu = reg_read(pm_fl_status[c][kind].mmu_pages);
 
-	pm_pause_ta_alloc(1);
 	reg_write64(r->base, base);
 	if (r->top_shift == 32)
 		reg_write64(r->top, (u64)top << 32);
+	else if (r->top_shift == 22)
+		reg_write64(r->top, (u64)top << 22);
 	else
 		reg_write(r->top, top);
 	reg_write(r->pages, alloc);
 	reg_write(r->mmu_pages, mmu);
 	reg_write(r->load, 1);
 	poll_reg(r->load, 1, 0);
+}
+
+/*
+ * Add @pages pages below the current base of free list @fl, in PM
+ * context 0 and, when the 3D context shares the list, in context 1.
+ */
+static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
+{
+	u64 base = fw_read64(fl + OFF_FREELIST_CURRENT_DEV_ADDR) - (u64)pages * 4;
+	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES) + pages;
+	u32 top = FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) + pages;
+
+	pm_pause_ta_alloc(1);
+	pm_fl_add(0, kind, base, pages);
+	if (pm_loaded_fl[1][kind] == fl)
+		pm_fl_add(1, kind, base, pages);
 	pm_pause_ta_alloc(0);
 
 	fw_write64(fl + OFF_FREELIST_CURRENT_DEV_ADDR, base);
 	FW32(fl + OFF_FREELIST_CURRENT_PAGES) = cur;
-	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = cur - 1;
+	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = top;
 	FW32(fl + OFF_FREELIST_READY_PAGES) = 0;
-	TRACE(SF_OPENFW_OOM_RESUMED, (u32)(base >> 32), (u32)base, cur, cur - 1);
+	TRACE(SF_OPENFW_OOM_RESUMED, (u32)(base >> 32), (u32)base, cur, top);
 	reg_write(0x0328, 1);			/* resume the TA */
 }
 

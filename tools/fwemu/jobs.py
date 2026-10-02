@@ -94,6 +94,7 @@ class Runner:
         self._kick_hist = []     # every kick, completed in order by the model
         self.oom_left = self.p["oom"]
         self.ta_stalled = False
+        self.ta_hold = False     # scenario keeps the TA running
         orig = self.emu.reg_model_write
 
         def model_write(off, value):
@@ -180,7 +181,7 @@ class Runner:
         if done >= len(self.all_kicks()):
             return False
         off = self.all_kicks()[done]
-        if KICKS[off][0] == "TA" and self.ta_stalled:
+        if KICKS[off][0] == "TA" and (self.ta_stalled or self.ta_hold):
             # a stalled TA only completes after the firmware resumes it;
             # complete the next other kick instead
             for i in range(done + 1, len(self._kick_hist)):
@@ -625,6 +626,63 @@ def sc_oom(r):
             "fwccb": [(hex(t), sorted(i.items())) for t, i in fw_cmds]}
 
 
+def sc_oom_live(r):
+    """OOM with ready pages; the kernel's grow update arrives while the
+    TA is still running."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    for n, q in (("geom", ctx.queues["geometry"]), ("frag", ctx.queues["fragment"])):
+        watch_queue(r, q, n)
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("fwccb_ctl", r.emu.fwccb_ctl, 16)
+    r.mark("setup")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    r.ta_hold = True
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry, out of memory")
+    cmds = h.fwccb_process()
+    r.kccb_bg()
+    r.settle("grow update during the TA")
+    r.ta_hold = False
+    r.settle("TA finishes")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"done": [geom.done(), pr.done(), frag.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
+
+
+def sc_oom_frames(r, n=3):
+    """Frames that each run out of memory once; grow updates in between."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    for nm, q in (("geom", ctx.queues["geometry"]), ("frag", ctx.queues["fragment"])):
+        watch_queue(r, q, nm)
+    for i in range(2):
+        r.watch_obj("hwrtdata%d" % i, rt.data[i], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("fwccb_ctl", r.emu.fwccb_ctl, 16)
+    r.mark("setup")
+    out, cmds = [], []
+    for i in range(n):
+        r.oom_left = 1
+        geom, pr, frag = render_jobs(r, ctx, rt.data[i % 2], 0x10 * i)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("frame %d geometry" % i)
+        cmds += h.fwccb_process()
+        r.kccb_bg()
+        r.settle("frame %d grow update" % i)
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("frame %d fragment" % i)
+        out.append([geom.done(), pr.done(), frag.done()])
+    return {"done": out, "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -642,6 +700,8 @@ SCENARIOS = {
     "teardown": sc_teardown,
     "mixed": sc_mixed,
     "oom": sc_oom,
+    "oom-live": sc_oom_live,
+    "oom-frames": sc_oom_frames,
 }
 
 
