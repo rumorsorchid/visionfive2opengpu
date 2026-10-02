@@ -52,6 +52,8 @@ CASES = [
     ("oom", "oom", {"oom": 1}),
     ("oom-status", "oom", {"oom": 1, "oom_regs": {0x20c8: 5, 0x20d8: 7, 0x20e0: 9,
                                                   0x348: 11, 0x3a0: 13, 0x2000: 15}}),
+    ("priority", "priority", {}),
+    ("priority2", "priority2", {}),
     ("multikick", "multikick", {}),
     ("suspend", "suspend", {}),
     ("suspend-status", "suspend", {"status_tags": 1}),

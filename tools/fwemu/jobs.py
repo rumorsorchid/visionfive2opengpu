@@ -788,6 +788,34 @@ def sc_power(r):
     return {"rtn": [e.r32(e.kccb_rtn + 4 * i) for i in range(8)], "sync": e.r32(sync)}
 
 
+def sc_priority(r, prios=(0, 0, 2, 1)):
+    """Contexts of different priority waiting for a busy data master:
+    compute contexts (CDM) and transfer contexts (3D pipe)."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    cctx = [h.compute_context(vm, priority=p) for p in prios]
+    tctx = [h.transfer_context(vm, priority=p) for p in prios]
+    for i, c in enumerate(cctx):
+        watch_queue(r, c.queues["compute"], "compute%d" % i)
+    for i, c in enumerate(tctx):
+        watch_queue(r, c.queues["transfer"], "transfer%d" % i)
+    r.mark("setup")
+    jobs_ = []
+    for i, c in enumerate(cctx):        # the first runs, the others wait
+        j = compute_job(r, c, base=0x10 * i)
+        h.submit(j)
+        jobs_.append(j)
+    for i, c in enumerate(tctx):
+        vals = fields(r, "rogue_fwif_cmd_transfer", 0x40 + i, {"regs.isp_render": 0x5A05A000 | 2})
+        t = h.job(c.queues["transfer"], H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+        h.submit(t)
+        jobs_.append(t)
+    r.kccb_bg()
+    r.settle("all submitted", complete=False)
+    r.settle("drain")
+    return {"done": [j.done() for j in jobs_]}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -810,6 +838,8 @@ SCENARIOS = {
     "multikick": sc_multikick,
     "suspend": sc_suspend,
     "power": sc_power,
+    "priority": sc_priority,
+    "priority2": lambda r: sc_priority(r, prios=(2, 1, 0, 2)),
 }
 
 

@@ -308,13 +308,13 @@ class Host:
         self.next_ctx_id += 1
         return ctx
 
-    def compute_context(self, vm, static=None):
+    def compute_context(self, vm, static=None, priority=0):
         S = "rogue_fwif_fwcomputecontext"
         ctx = self._new_ctx("compute", vm, S)
         off, _ = self.L.field(S, "cdm_context")
         q = Queue(self, ctx, "compute", DM_CDM, off, self.L.size("rogue_fwif_compute_ctx_state"))
         ctx.queues["compute"] = q
-        self._init_fw_context(ctx, q)
+        self._init_fw_context(ctx, q, priority)
         static = static if static is not None else {
             n: tag(0x100 + i, 64) for i, n in enumerate(
                 ("cdmreg_cdm_context_pds0", "cdmreg_cdm_context_pds1", "cdmreg_cdm_terminate_pds",
@@ -351,14 +351,14 @@ class Host:
         self._put_static(ctx, S, "static_render_context_state.ctxswitch_regs[0]", static)
         return self._finish_context(ctx)
 
-    def transfer_context(self, vm):
+    def transfer_context(self, vm, priority=0):
         S = "rogue_fwif_fwtransfercontext"
         ctx = self._new_ctx("transfer", vm, S)
         off, _ = self.L.field(S, "tq_context")
         q = Queue(self, ctx, "transfer", DM_FRAG, off,
                   self.L.size("rogue_fwif_frag_ctx_state") + 4 * 1)
         ctx.queues["transfer"] = q
-        self._init_fw_context(ctx, q)
+        self._init_fw_context(ctx, q, priority)
         return self._finish_context(ctx)
 
     def _put_static(self, ctx, S, prefix, values):

@@ -334,15 +334,29 @@ static u32 ctx_dm(u32 ctx)
 	return FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
 }
 
-/* Process the ready contexts of one data master, oldest first. */
+/*
+ * Process the ready contexts of one data master: highest priority first
+ * (PVR_CTX_PRIORITY_*), then in the order they became ready.
+ */
 static int run_dm(u32 dm)
 {
 	u32 list[MAX_READY], n = 0;
 	int progress = 0;
 
-	for (u32 i = 0; i < nready; i++)
-		if (ctx_dm(ready[i]) == dm)
-			list[n++] = ready[i];
+	for (u32 i = 0; i < nready; i++) {
+		u32 c = ready[i], p = FW32(c + OFF_FWCOMMONCONTEXT_PRIORITY), k = n++;
+
+		if (ctx_dm(c) != dm) {
+			n--;
+			continue;
+		}
+		/* stable insertion by descending priority */
+		while (k && FW32(list[k - 1] + OFF_FWCOMMONCONTEXT_PRIORITY) < p) {
+			list[k] = list[k - 1];
+			k--;
+		}
+		list[k] = c;
+	}
 	for (u32 i = 0; i < n; i++)
 		progress |= process(list[i]);
 	return progress;
