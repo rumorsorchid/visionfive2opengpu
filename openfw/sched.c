@@ -25,8 +25,6 @@
 static u32 ready[MAX_READY];
 static u32 nready;
 static struct job running[DM_COUNT];
-static u32 busy;		/* a job ran since the GPU last went idle */
-static u32 frag_used;		/* ... and one of them on the 3D pipe */
 
 static const u32 hdr_size = SIZEOF_CCB_CMD_HEADER;
 
@@ -56,17 +54,23 @@ static void ready_del(u32 ctx)
 	}
 }
 
+int sched_dm_busy(u32 dm)
+{
+	return running[dm].ctx != 0;
+}
+
+/* No job on any data master (contexts blocked on fences do not count). */
 int sched_idle(void)
 {
 	for (u32 dm = 0; dm < DM_COUNT; dm++)
 		if (running[dm].ctx)
 			return 0;
-	return nready == 0;
+	return 1;
 }
 
 void sched_reset(void)
 {
-	nready = busy = frag_used = 0;
+	nready = 0;
 	for (u32 dm = 0; dm < DM_COUNT; dm++)
 		running[dm].ctx = 0;
 }
@@ -155,11 +159,10 @@ static u32 run_updates(struct cccb *c, u32 off)
 	return off;
 }
 
-static void set_offsets(struct cccb *c, u32 read, u32 dep)
+static void set_read(struct cccb *c, u32 read)
 {
 	FW32(c->ctl + OFF_CCCB_CTL_READ_OFFSET) = read;
 	FW32(c->ctl + OFF_CCCB_CTL_READ_OFFSET2) = read;
-	FW32(c->ctl + OFF_CCCB_CTL_DEP_OFFSET) = dep;
 }
 
 /* -- jobs ---------------------------------------------------------------------------- */
@@ -208,9 +211,6 @@ static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type)
 		j->ctx = 0;
 		return 0;
 	}
-	if (dm == DM_FRAG)
-		frag_used = 1;
-	busy = 1;
 
 	switch (type) {
 	case CCB_CDM:
@@ -234,49 +234,64 @@ static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type)
 }
 
 /*
- * Advance one context as far as possible. Returns 1 if it made progress.
+ * dep_offset: how far the context's commands have been checked. It moves
+ * over every command whose fences are satisfied, queued jobs included,
+ * and stops at the first fence that is not.
+ */
+static u32 dep_walk(u32 ctx, struct cccb *c)
+{
+	u32 d = FW32(c->ctl + OFF_CCCB_CTL_DEP_OFFSET);
+
+	while (d != c->woff) {
+		u32 t = cmd_type(c, d);
+
+		if (t == CCB_PADDING) {
+			d = 0;
+			continue;
+		}
+		if ((t == CCB_FENCE || t == CCB_FENCE_PR) &&
+		    !fences_satisfied(ctx, c->ccb + d + hdr_size, cmd_size(c, d)))
+			break;
+		d = cmd_next(c, d);
+	}
+	FW32(c->ctl + OFF_CCCB_CTL_DEP_OFFSET) = d;
+	return d;
+}
+
+/*
+ * Run a context's checked commands: apply UPDATEs, signal NULL and
+ * unneeded partial-render commands, start its next job when the data
+ * master is free. Returns 1 if it made progress.
  */
 static int process(u32 ctx)
 {
 	struct cccb c;
-	u32 off, read, dm;
+	u32 off, dep, dm;
 	int progress = 0;
 
 	cccb_open(ctx, &c);
+	dep = dep_walk(ctx, &c);
 	dm = FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
 	if (dm < DM_COUNT && running[dm].ctx == ctx)
 		return 0;			/* a job of this context is running */
-	read = FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET);
-	off = read;
+	off = FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET);
 
-	while (off != c.woff) {
-		u32 t = cmd_type(&c, off), size = cmd_size(&c, off);
+	while (off != dep) {
+		u32 t = cmd_type(&c, off);
 		u32 payload = c.ccb + off + hdr_size;
 
 		switch (t) {
 		case CCB_PADDING:
 			off = 0;
-			if (read != 0)
-				read = 0;
-			continue;
-		case CCB_FENCE:
-		case CCB_FENCE_PR:
-			if (!fences_satisfied(ctx, payload, size)) {
-				set_offsets(&c, read, off);
-				return progress;
-			}
-			off = cmd_next(&c, off);
 			continue;
 		case CCB_UPDATE:
 		case CCB_UNFENCED_UPDATE:
-			apply_updates(payload, size);
+			apply_updates(payload, cmd_size(&c, off));
 			off = cmd_next(&c, off);
-			read = off;
 			progress = 1;
 			continue;
 		case CCB_NULL:
 			off = run_updates(&c, cmd_next(&c, off));
-			read = off;
 			progress = 1;
 			host_irq();
 			continue;
@@ -284,7 +299,6 @@ static int process(u32 ctx)
 			if (!frag_pr_needed(&(struct job){ .hwrt = cmd_hwrt(t, payload) })) {
 				/* no partial render pending: only signal the fence */
 				off = run_updates(&c, cmd_next(&c, off));
-				read = off;
 				progress = 1;
 				host_irq();
 				continue;
@@ -294,56 +308,61 @@ static int process(u32 ctx)
 		case CCB_TQ_3D:
 		case CCB_GEOM:
 		case CCB_FRAG:
-			dm = job_dm(t);
-			if (running[dm].ctx) {
-				set_offsets(&c, read, off);
-				return progress;
-			}
-			{
-				/* dep_offset: past the job and its UPDATEs */
-				u32 dep = cmd_next(&c, off);
-
-				while (dep != c.woff && (cmd_type(&c, dep) == CCB_UPDATE ||
-							 cmd_type(&c, dep) == CCB_UNFENCED_UPDATE))
-					dep = cmd_next(&c, dep);
-				set_offsets(&c, read, dep);
-			}
-			if (!start_job(ctx, &c, off, t))
+			set_read(&c, off);
+			if (running[job_dm(t)].ctx || !start_job(ctx, &c, off, t))
 				return progress;
 			return 1;
 		default:
-			/* unknown command: skip it */
+			/* fences (checked by dep_walk) and unknown commands */
 			off = cmd_next(&c, off);
-			read = off;
 			continue;
 		}
 	}
-	set_offsets(&c, read, off);
-	ready_del(ctx);
-	return 1;
+	set_read(&c, off);
+	if (off == c.woff)
+		ready_del(ctx);
+	return progress;
 }
+
+static u32 ctx_dm(u32 ctx)
+{
+	return FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
+}
+
+/* Process the ready contexts of one data master, oldest first. */
+static int run_dm(u32 dm)
+{
+	u32 list[MAX_READY], n = 0;
+	int progress = 0;
+
+	for (u32 i = 0; i < nready; i++)
+		if (ctx_dm(ready[i]) == dm)
+			list[n++] = ready[i];
+	for (u32 i = 0; i < n; i++)
+		progress |= process(list[i]);
+	return progress;
+}
+
+/*
+ * Data masters are served in a fixed order: the 3D pipe first (fragment
+ * and transfer jobs; finishing renders frees parameter memory), then
+ * geometry, then compute. After a completion the data master that just
+ * finished is refilled first (sched_irq).
+ */
+static const u8 dm_order[] = { DM_FRAG, DM_GEOM, DM_CDM };
 
 void sched_run(void)
 {
 	int progress;
 
 	do {
-		u32 list[MAX_READY], n = nready;
-
 		progress = 0;
-		for (u32 i = 0; i < n; i++)
-			list[i] = ready[i];
-		for (u32 i = 0; i < n; i++)
-			progress |= process(list[i]);
+		for (u32 o = 0; o < sizeof(dm_order); o++)
+			progress |= run_dm(dm_order[o]);
 	} while (progress);
 
-	if (sched_idle() && busy) {
+	if (sched_idle() && pow_state() == POW_ON) {
 		/* Idle: let the kernel power the GPU down. */
-		busy = 0;
-		if (frag_used) {
-			frag_used = 0;
-			reg_write(0x6300, 1);
-		}
 		set_pow_state(POW_IDLE);
 		host_irq();
 	}
@@ -372,13 +391,11 @@ static void complete(u32 dm)
 {
 	struct job *j = &running[dm];
 	struct cccb c;
-	u32 off;
 
 	if (!j->ctx)
 		return;
 	cccb_open(j->ctx, &c);
-	off = run_updates(&c, j->end);
-	set_offsets(&c, off, FW32(c.ctl + OFF_CCCB_CTL_DEP_OFFSET));
+	set_read(&c, run_updates(&c, j->end));
 	if (j->hwrt && j->type != CCB_FRAG_PR) {
 		u32 cl = j->hwrt + OFF_HWRTDATA_CLEANUP_STATE;
 
@@ -424,6 +441,9 @@ void sched_irq(void)
 			break;
 		}
 		complete(dm);
+		run_dm(dm);
+		if (dm == DM_FRAG && !running[DM_FRAG].ctx)
+			reg_write(0x6300, 1);	/* the 3D pipe goes idle */
 	}
 	sched_run();
 }
@@ -461,6 +481,8 @@ u32 sched_cleanup(u32 type, u32 addr)
 			     FW32(h + OFF_HWRTDATA_FREELISTS_FW_ADDR1) == addr))
 				return KCCB_RTN_CMD_EXECUTED | KCCB_RTN_CLEANUP_BUSY;
 		}
+		pm_unload_freelists(addr);
+		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 		break;
 	}
 	/* the kernel frees the object next: drop any stale TLB entries */

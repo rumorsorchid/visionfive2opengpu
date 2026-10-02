@@ -288,11 +288,7 @@ static void fw_bg_task(void)
 {
 	TRACE(SF_OPENFW_BG, 0);
 	kccb_process();
-	sched_run();
-	/* Nothing in flight: report idle so the kernel may runtime-suspend
-	 * the GPU. */
-	if (sched_idle() && pow_state() == POW_ON)
-		set_pow_state(POW_IDLE);
+	sched_run();		/* reports IDLE when nothing runs */
 	mts_task_done(MTS_TASK_DONE_BG);
 	if (g.halt)
 		halt();

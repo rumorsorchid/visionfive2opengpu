@@ -36,6 +36,17 @@ CASES = [
     ("render-small", "render", {"width": 64, "height": 64}),
     ("geom-only", "geom", {}),
     ("cleanup", "cleanup", {}),
+    ("frames", "frames", {}),
+    ("frames-status", "frames", {"status_tags": 1}),
+    ("frames-pipelined", "frames-pipelined", {}),
+    ("frames-pipe-status", "frames-pipelined", {"status_tags": 1}),
+    ("multivm", "multivm", {}),
+    ("multivm-concurrent", "multivm-concurrent", {}),
+    ("blocked", "blocked", {}),
+    ("cleanup-busy", "cleanup-busy", {}),
+    ("teardown", "teardown", {}),
+    ("mixed", "mixed", {}),
+    ("wrap", "wrap", {}),
 ]
 
 
@@ -66,7 +77,7 @@ def compare(name, a, b, verbose):
         if i >= len(sa) or i >= len(sb):
             errors.append("step count differs: %d vs %d" % (len(sa), len(sb)))
             break
-        (na, acc_a, mem_a), (nb, acc_b, mem_b) = sa[i], sb[i]
+        (na, acc_a, mem_a), (_, acc_b, mem_b) = sa[i], sb[i]
         if acc_a != acc_b:
             n = next((j for j in range(min(len(acc_a), len(acc_b))) if acc_a[j] != acc_b[j]),
                      min(len(acc_a), len(acc_b)))
@@ -78,9 +89,12 @@ def compare(name, a, b, verbose):
         for obj in sorted(set(mem_a) | set(mem_b)):
             if mem_a.get(obj) != mem_b.get(obj):
                 errors.append("step '%s': memory %s differs" % (na, obj))
-                if verbose:
-                    errors.append("  openfw    %s" % (mem_a.get(obj, b"").hex()))
-                    errors.append("  reference %s" % (mem_b.get(obj, b"").hex()))
+                da, db = mem_a.get(obj, b""), mem_b.get(obj, b"")
+                for off in range(0, max(len(da), len(db)), 4):
+                    wa, wb = da[off:off + 4], db[off:off + 4]
+                    if wa != wb:
+                        errors.append("  +0x%03x openfw %-10s reference %s" % (
+                            off, wa[::-1].hex() or "-", wb[::-1].hex() or "-"))
     print("%-18s %s" % (name, "ok" if not errors else "FAIL"))
     for e in errors:
         print("    " + e)

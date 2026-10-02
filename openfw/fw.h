@@ -157,6 +157,7 @@ void sched_run(void);
 void sched_irq(void);
 u32 sched_cleanup(u32 type, u32 addr);
 int sched_idle(void);
+int sched_dm_busy(u32 dm);
 void sched_reset(void);
 
 struct job {
@@ -181,5 +182,6 @@ void finish_geom(struct job *j);
 void finish_frag(struct job *j);
 int frag_pr_needed(struct job *j);
 void pm_reset(void);
+void pm_unload_freelists(u32 fl);
 
 #endif

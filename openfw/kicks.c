@@ -175,16 +175,31 @@ static const struct pm_fl_regs pm_fl[2][2] = {
 	},
 };
 
-/* Where the TA's PM context reports the free list state it ended with. */
+/* Where each PM context reports the current free list state. */
 static const struct {
 	u16 top, pages, mmu_pages;
-} pm_fl_status[2] = {
-	{ 0x0348, 0x03A0, 0x2000 },	/* local */
-	{ 0x20C8, 0x20D8, 0x20E0 },	/* global */
+} pm_fl_status[2][2] = {
+	{ { 0x0348, 0x03A0, 0x2000 },	/* TA local */
+	  { 0x20C8, 0x20D8, 0x20E0 } },	/* TA global */
+	{ { 0x0350, 0x03A8, 0x2008 },	/* 3D local */
+	  { 0x2088, 0x2098, 0x20A0 } },	/* 3D global */
 };
 
 /* Free lists loaded in each PM context: [context][local/global] */
 static u32 pm_loaded_fl[2][2];
+
+/* HWRT data whose geometry finished and whose 3D pass has not started */
+static u32 pm_pending_hwrt, pm_pending_stored;
+
+/* After the TA: what PM context 0 built for this render target. */
+static void pm_store_rtdata(u32 h)
+{
+	FW32(h + OFF_HWRTDATA_PM_MLIST_STACK_POINTER) = reg_read(0x02C0);
+	fw_write64(h + OFF_HWRTDATA_PM_ALIST_STACK_POINTER, reg_read64(0x0270));
+	fw_write64(h + OFF_HWRTDATA_VCE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_VCE0));
+	fw_write64(h + OFF_HWRTDATA_TE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_TE0));
+	fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST0));
+}
 
 static void pm_load_freelist(u32 pmctx, u32 kind, u32 fl)
 {
@@ -205,11 +220,34 @@ static void pm_load_freelist(u32 pmctx, u32 kind, u32 fl)
 	pm_loaded_fl[pmctx][kind] = fl;
 }
 
-static void pm_store_freelist(u32 kind, u32 fl)
+static void pm_store_freelist(u32 pmctx, u32 kind, u32 fl)
 {
-	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = reg_read(pm_fl_status[kind].top);
-	FW32(fl + OFF_FREELIST_ALLOCATED_PAGE_COUNT) = reg_read(pm_fl_status[kind].pages);
-	FW32(fl + OFF_FREELIST_ALLOCATED_MMU_PAGE_COUNT) = reg_read(pm_fl_status[kind].mmu_pages);
+	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = reg_read(pm_fl_status[pmctx][kind].top);
+	FW32(fl + OFF_FREELIST_ALLOCATED_PAGE_COUNT) = reg_read(pm_fl_status[pmctx][kind].pages);
+	FW32(fl + OFF_FREELIST_ALLOCATED_MMU_PAGE_COUNT) =
+		reg_read(pm_fl_status[pmctx][kind].mmu_pages);
+}
+
+/*
+ * Before the kernel frees a free list: if the PM holds it, store every
+ * free list the PM holds back to memory and forget them all.
+ */
+void pm_unload_freelists(u32 fl)
+{
+	int held = 0;
+
+	for (u32 c = 0; c < 2; c++)
+		for (u32 k = 0; k < 2; k++)
+			held |= pm_loaded_fl[c][k] == fl;
+	if (!held)
+		return;
+	for (u32 c = 0; c < 2; c++) {
+		for (u32 k = 0; k < 2; k++) {
+			if (pm_loaded_fl[c][k])
+				pm_store_freelist(c, k, pm_loaded_fl[c][k]);
+			pm_loaded_fl[c][k] = 0;
+		}
+	}
 }
 
 static u32 hwrt_freelist(u32 hwrt, u32 kind)
@@ -232,6 +270,7 @@ void pm_reset(void)
 {
 	for (u32 c = 0; c < 2; c++)
 		pm_loaded_fl[c][0] = pm_loaded_fl[c][1] = 0;
+	pm_pending_hwrt = pm_pending_stored = 0;
 }
 
 /* -- geometry ------------------------------------------------------------------ */
@@ -244,21 +283,31 @@ void kick_geom(struct job *j)
 	u32 flags = FW32(p + OFF_CMD_GEOM_FLAGS);
 	u64 v;
 
+	/* PM context 0 is about to be reused: keep what it built for a
+	 * render whose 3D pass has not started yet */
+	if (pm_pending_hwrt && pm_pending_hwrt != h && !pm_pending_stored) {
+		pm_store_rtdata(pm_pending_hwrt);
+		pm_pending_stored = 1;
+	}
 	reg_write64(0x03D0, 0x100000100ull);
 	for (u32 k = 0; k < 2; k++) {
 		u32 fl = hwrt_freelist(h, k);
 
-		if (fl)
+		if (fl && pm_loaded_fl[0][k] != fl)
 			pm_load_freelist(0, k, fl);
 	}
 	pm_set_pb_base();
 	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 
-	/* PM context 0: MLIST and page catalogues of this render target */
+	/* PM context 0: MLIST and page catalogues of this render target. The
+	 * catalogues are left alone while another render's geometry output
+	 * still waits for its 3D pass (as the reference firmware does). */
 	copy64(0x02D8, h + OFF_HWRTDATA_PM_MLIST_DEV_ADDR);
-	copy64(CR_BIF_PM_CAT_BASE_VCE0, h + OFF_HWRTDATA_VCE_CAT_BASE0);
-	copy64(CR_BIF_PM_CAT_BASE_TE0, h + OFF_HWRTDATA_TE_CAT_BASE0);
-	copy64(CR_BIF_PM_CAT_BASE_ALIST0, h + OFF_HWRTDATA_ALIST_CAT_BASE);
+	if (!pm_pending_hwrt || pm_pending_hwrt == h) {
+		copy64(CR_BIF_PM_CAT_BASE_VCE0, h + OFF_HWRTDATA_VCE_CAT_BASE0);
+		copy64(CR_BIF_PM_CAT_BASE_TE0, h + OFF_HWRTDATA_TE_CAT_BASE0);
+		copy64(CR_BIF_PM_CAT_BASE_ALIST0, h + OFF_HWRTDATA_ALIST_CAT_BASE);
+	}
 	copy64(0x0248, h + OFF_HWRTDATA_VHEAP_TABLE_DEV_ADDR);
 	reg_write(0x0258, 1);
 	poll_reg(0x0258, 1, 0);
@@ -295,7 +344,9 @@ void kick_geom(struct job *j)
 	copy64(0x0408, p + OFF_CMD_GEOM_REGS_VDM_CTRL_STREAM_BASE);
 	copy64(0x0418, st + OFF_GEOM_CTX_STATE_GEOM_CORE0_GEOM_REG_VDM_CALL_STACK_POINTER_INIT);
 
-	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
+	FW32(h + OFF_HWRTDATA_STATE) = (flags & GEOM_FLAGS_FIRSTKICK) ? RTDATA_KICK_GEOM_FIRST
+								     : RTDATA_KICK_GEOM;
+	FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING) = 1;
 	if (flags & GEOM_FLAGS_LASTKICK)
 		FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) |= HWRTDATA_HAS_LAST_GEOM;
 
@@ -308,6 +359,8 @@ void kick_geom(struct job *j)
 
 void finish_geom(struct job *j)
 {
+	u32 h = j->hwrt;
+
 	TRACE(SF_OPENFW_TA_DONE);
 	reg_write(CR_EVENT_CLEAR, EVENT_TA_FINISHED);
 	/* tail pointer cache flush */
@@ -316,7 +369,10 @@ void finish_geom(struct job *j)
 	poll_reg(0x0CB8, 2, 0);
 	poll_reg(0x0C50, 0x40000000, 0);
 	gpu_dm_fence(DM_GEOM);
-	FW32(j->hwrt + OFF_HWRTDATA_STATE) = RTDATA_GEOM_FINISHED;
+	pm_pending_hwrt = h;	/* its PM state is stored when the 3D takes it */
+	pm_pending_stored = 0;
+	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_GEOM_FINISHED;
+	FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING) = 0;
 }
 
 /* -- fragment ------------------------------------------------------------------ */
@@ -334,23 +390,24 @@ void kick_frag(struct job *j)
 	u32 isp_ctl = FW32(p + OFF_CMD_FRAG_REGS_ISP_CTL);
 
 	/*
-	 * Hand the TA's PM state over to the 3D: store what PM context 0
-	 * ended with into the HWRT data and free lists, then load them
-	 * into context 1.
+	 * Hand the geometry output over to the 3D: the HWRT data holds the
+	 * PM state the TA ended with (pm_store_rtdata); free lists the 3D
+	 * context does not hold yet are stored from the TA context and
+	 * loaded into context 1.
 	 */
-	FW32(h + OFF_HWRTDATA_PM_MLIST_STACK_POINTER) = reg_read(0x02C0);
-	fw_write64(h + OFF_HWRTDATA_PM_ALIST_STACK_POINTER, reg_read64(0x0270));
-	fw_write64(h + OFF_HWRTDATA_VCE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_VCE0));
-	fw_write64(h + OFF_HWRTDATA_TE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_TE0));
-	fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST0));
+	if (pm_pending_hwrt == h) {
+		if (!pm_pending_stored)
+			pm_store_rtdata(h);
+		pm_pending_hwrt = pm_pending_stored = 0;
+	}
 	reg_write64(0x03D0, 0x100010100ull);
 	for (u32 k = 0; k < 2; k++) {
 		u32 fl = hwrt_freelist(h, k);
 
-		if (!fl)
-			continue;
+		if (!fl || pm_loaded_fl[1][k] == fl)
+			continue;	/* already shared by both contexts */
 		if (pm_loaded_fl[0][k] == fl)
-			pm_store_freelist(k, fl);
+			pm_store_freelist(0, k, fl);
 		pm_load_freelist(1, k, fl);
 	}
 	pm_set_pb_base();
@@ -425,7 +482,10 @@ void finish_frag(struct job *j)
 	/* the PM must have released the render's memory */
 	poll_reg(CR_EVENT_STATUS, EVENT_PM_3D_MEM_FREE, EVENT_PM_3D_MEM_FREE);
 	reg_write(CR_EVENT_CLEAR, EVENT_PM_3D_MEM_FREE);
-	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+	/* PC cache invalidate, except while a TA runs and another render's
+	 * geometry output waits for its 3D pass (as the reference firmware) */
+	if (!(sched_dm_busy(DM_GEOM) && pm_pending_hwrt))
+		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 	TRACE(SF_OPENFW_3D_DONE, 0x7FFFFFFFu, FW32(h + OFF_HWRTDATA_STATE));
 	reg_write(CR_EVENT_CLEAR, EVENT_PIXELBE_END_RENDER);
 	gpu_dm_fence(DM_FRAG);

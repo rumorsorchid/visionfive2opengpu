@@ -20,6 +20,15 @@ Scenarios:
   render       geometry + partial-render fragment (combined kick) + fragment
   geom         geometry + partial-render fragment only
   cleanup      compute job, then context cleanup
+  frames       three frames on one render target (HWRT data 0, 1, 0)
+  frames-pipelined  four frames, next geometry kicked while the fragment runs
+  multivm      compute/transfer contexts in two VMs, sequential
+  multivm-concurrent  the same with the jobs in flight together
+  blocked      a job waiting on another context's later job
+  wrap         200 chained compute jobs: the client CCB wraps (PADDING)
+  cleanup-busy context cleanup while its job runs, then when idle
+  teardown     render, then context / HWRT data / free list cleanups
+  mixed        compute, transfer and a render in flight together
 """
 import argparse
 import io
@@ -81,7 +90,8 @@ class Runner:
         self.tags = {}
         self.steps = []
         self.watch = {}
-        self.kicks = []
+        self.kicks = []          # kicks in the current step (reports)
+        self._kick_hist = []     # every kick, completed in order by the model
         orig = self.emu.reg_model_write
 
         def model_write(off, value):
@@ -89,6 +99,7 @@ class Runner:
             o = off & ~0x200000
             if o in KICKS and value & 1:
                 self.kicks.append(o)
+                self._kick_hist.append(o)
         self.emu.reg_model_write = model_write
 
     def out(self):
@@ -148,11 +159,14 @@ class Runner:
         """Deliver queued MTS tasks; complete started work like the GPU."""
         e = self.emu
         with self.out():
-            for _ in range(rounds):
+            budget = rounds          # per completed kick
+            while budget > 0:
+                budget -= 1
                 if e.pending_tasks:
                     e.inject(e.pending_tasks.pop(0))
                     continue
                 if complete and self.kicks_pending():
+                    budget = rounds
                     continue
                 break
         return self.mark(label)
@@ -172,10 +186,6 @@ class Runner:
         return True
 
     def all_kicks(self):
-        if not hasattr(self, "_kick_hist"):
-            self._kick_hist = []
-        self._kick_hist.extend(self.kicks)
-        self.kicks = []
         return self._kick_hist
 
     def kccb_bg(self):
@@ -347,6 +357,215 @@ def sc_cleanup(r):
     return res
 
 
+def new_render(r, vm=None, data_sets=1):
+    """Render context with local + global free lists and HWRT data sets."""
+    h, p = r.host, r.p
+    vm = vm or h.vm_context(p["pc"])
+    ctx = h.render_context(vm, callstack_addr=p["callstack"])
+    fl = h.free_list(vm, gpu_addr=p["fl_addr"], initial=p["fl_initial"], max_pages=p["fl_max"],
+                     grow=p["fl_grow"])
+    gfl = h.free_list(vm, gpu_addr=p["gfl_addr"], initial=p["fl_initial"],
+                      max_pages=p["fl_max"], grow=p["fl_grow"])
+    rts = [h.hwrt([fl, gfl], width=p["width"], height=p["height"], samples=p["samples"],
+                  geom=p["geom"], rt=p["rt"]) for _ in range(data_sets)]
+    return ctx, fl, gfl, rts
+
+
+def render_jobs(r, ctx, hwrt, base, deps=()):
+    """Geometry + partial-render fragment (combined kick) and the fragment
+    job, as pvr_queue builds them for one DRM_PVR_JOB_TYPE_GEOMETRY +
+    FRAGMENT submission."""
+    h = r.host
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    gvals = fields(r, "rogue_fwif_cmd_geom", base, {"flags": 0x3})
+    r.tag_fields("rogue_fwif_cmd_geom", gvals)
+    gvals["cmd_shared.hwrt_data_fw_addr"] = hwrt
+    geom = h.job(gq, H.CCB_GEOM, H.cmd(h.L, "rogue_fwif_cmd_geom", gvals), deps=deps, hwrt=hwrt)
+    pvals = fields(r, "rogue_fwif_cmd_frag", base + 0x80)
+    pvals["cmd_shared.hwrt_data_fw_addr"] = hwrt
+    pr = h.job(fq, H.CCB_FRAG_PR, H.cmd(h.L, "rogue_fwif_cmd_frag", pvals), hwrt=hwrt)
+    fvals = fields(r, "rogue_fwif_cmd_frag", base + 0x100)
+    r.tag_fields("rogue_fwif_cmd_frag", fvals)
+    fvals["cmd_shared.hwrt_data_fw_addr"] = hwrt
+    frag = h.job(fq, H.CCB_FRAG, H.cmd(h.L, "rogue_fwif_cmd_frag", fvals),
+                 deps=[geom.fence()], hwrt=hwrt)
+    return geom, pr, frag
+
+
+def sc_frames(r, n=3, pipelined=False):
+    """n frames on one render target; frame i uses HWRT data i % 2 like
+    Mesa. Pipelined: frame i+1's geometry is kicked while frame i's
+    fragment job is still running."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    for i in range(2):
+        r.watch_obj("hwrtdata%d" % i, rt.data[i], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.mark("setup")
+    frames = []
+    for i in range(n):
+        geom, pr, frag = render_jobs(r, ctx, rt.data[i % 2], 0x10 * i)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("frame %d geometry" % i, complete=not pipelined or i == 0)
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("frame %d fragment" % i, complete=not pipelined)
+        frames.append((geom, pr, frag))
+    if pipelined:
+        r.settle("drain")
+    return {"done": [[j.done() for j in f] for f in frames],
+            "geom_ufo": gq.ufo_value(), "frag_ufo": fq.ufo_value()}
+
+
+def sc_multivm(r, concurrent=False):
+    """Compute and transfer contexts in two VMs (two page catalogues)."""
+    h = r.host
+    vms = [h.vm_context(r.p["pc"]), h.vm_context(r.p["pc"] + 0x100000)]
+    cctx = [h.compute_context(vm) for vm in vms]
+    tctx = h.transfer_context(vms[1])
+    for i, c in enumerate(cctx):
+        watch_queue(r, c.queues["compute"], "compute%d" % i)
+        r.watch_obj("fwmemctx%d" % i, vms[i], 16)
+    watch_queue(r, tctx.queues["transfer"], "transfer")
+    r.mark("setup")
+    jobs_ = []
+    for rnd in range(2):
+        for i, c in enumerate(cctx):
+            j = compute_job(r, c, base=0x10 * (2 * rnd + i))
+            h.submit(j)
+            r.kccb_bg()
+            r.settle("round %d compute vm%d" % (rnd, i), complete=not concurrent)
+            jobs_.append(j)
+        vals = fields(r, "rogue_fwif_cmd_transfer", 0x40 + rnd, {"regs.isp_render": 0x5A05A000 | 2})
+        r.tag_fields("rogue_fwif_cmd_transfer", vals)
+        t = h.job(tctx.queues["transfer"], H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+        h.submit(t)
+        r.kccb_bg()
+        r.settle("round %d transfer vm1" % rnd, complete=not concurrent)
+        jobs_.append(t)
+        if concurrent:
+            r.settle("round %d drain" % rnd)
+    return {"done": [j.done() for j in jobs_]}
+
+
+def sc_blocked(r):
+    """A job waiting on another context's job that is submitted later."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    a, b = h.compute_context(vm), h.compute_context(vm)
+    qa, qb = a.queues["compute"], b.queues["compute"]
+    watch_queue(r, qa, "computeA")
+    watch_queue(r, qb, "computeB")
+    r.mark("setup")
+    # B's job depends on A's next fence value, which A has not reached
+    jb = compute_job(r, b, deps=[(qa.ufo, qa.seqno + 1)], base=0x20)
+    h.submit(jb)
+    r.kccb_bg()
+    r.settle("B blocked")
+    ja = compute_job(r, a, base=0x10)
+    h.submit(ja)
+    r.kccb_bg()
+    r.settle("A runs, then B")
+    return {"done": [ja.done(), jb.done()], "a": qa.ufo_value(), "b": qb.ufo_value()}
+
+
+def sc_wrap(r, n=200):
+    """Enough compute jobs to wrap the 32 KiB client CCB (PADDING)."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    r.mark("setup")
+    js = []
+    for i in range(n):
+        j = compute_job(r, ctx, deps=[js[-1].fence()] if js else [], base=0x10 * (i % 8))
+        h.submit(j)
+        r.kccb_bg()
+        r.settle("job %d" % i)
+        js.append(j)
+    return {"done": all(j.done() for j in js), "ufo": q.ufo_value(),
+            "read_offset": h.get("rogue_fwif_cccb_ctl", q.ctrl, "read_offset"),
+            "write_offset": q.write_offset}
+
+
+def sc_cleanup_busy(r):
+    """CLEANUP of a context while its job runs: busy, then done."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 16)
+    r.mark("setup")
+    j = compute_job(r, ctx)
+    h.submit(j)
+    r.kccb_bg()
+    r.settle("job running", complete=False)
+    s1 = h.cleanup(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(q))
+    r.kccb_bg()
+    r.settle("cleanup while busy", complete=False)
+    rtn1 = r.emu.r32(r.emu.kccb_rtn + 4 * s1)
+    r.settle("job completes")
+    s2 = h.cleanup(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(q))
+    r.kccb_bg()
+    r.settle("cleanup when idle")
+    return {"done": j.done(), "busy_rtn": rtn1, "idle_rtn": r.emu.r32(r.emu.kccb_rtn + 4 * s2)}
+
+
+def sc_teardown(r):
+    """Render, then the kernel's teardown order: contexts, HWRT data, free lists."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 32)
+    r.mark("setup")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    slots = []
+    for kind, addr in ((H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["geometry"])),
+                       (H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["fragment"])),
+                       (H.CLEANUP_HWRTDATA, rt.data[0]), (H.CLEANUP_HWRTDATA, rt.data[1]),
+                       (H.CLEANUP_FREELIST, fl.fw), (H.CLEANUP_FREELIST, gfl.fw)):
+        slots.append(h.cleanup(kind, addr))
+        r.kccb_bg()
+        r.settle("cleanup %d" % kind)
+    return {"done": frag.done(), "rtn": [r.emu.r32(r.emu.kccb_rtn + 4 * s) for s in slots]}
+
+
+def sc_mixed(r):
+    """Compute, transfer and a render in flight at the same time."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    cctx, tctx = h.compute_context(vm), h.transfer_context(vm)
+    ctx, fl, gfl, (rt,) = new_render(r, vm)
+    for n, q in (("compute", cctx.queues["compute"]), ("transfer", tctx.queues["transfer"]),
+                 ("geom", ctx.queues["geometry"]), ("frag", ctx.queues["fragment"])):
+        watch_queue(r, q, n)
+    r.mark("setup")
+    cj = compute_job(r, cctx)
+    h.submit(cj)
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    vals = fields(r, "rogue_fwif_cmd_transfer", 0x40, {"regs.isp_render": 0x5A05A000 | 2})
+    t = h.job(tctx.queues["transfer"], H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+    h.submit(t)
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("all kicked", complete=False)
+    r.settle("drain")
+    return {"done": [cj.done(), geom.done(), pr.done(), t.done(), frag.done()]}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -354,6 +573,15 @@ SCENARIOS = {
     "render": sc_render,
     "geom": lambda r: sc_render(r, with_frag=False),
     "cleanup": sc_cleanup,
+    "frames": sc_frames,
+    "frames-pipelined": lambda r: sc_frames(r, n=4, pipelined=True),
+    "multivm": sc_multivm,
+    "multivm-concurrent": lambda r: sc_multivm(r, concurrent=True),
+    "blocked": sc_blocked,
+    "wrap": sc_wrap,
+    "cleanup-busy": sc_cleanup_busy,
+    "teardown": sc_teardown,
+    "mixed": sc_mixed,
 }
 
 
