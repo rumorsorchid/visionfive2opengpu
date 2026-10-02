@@ -216,6 +216,23 @@ class Runner:
     def all_kicks(self):
         return self._kick_hist
 
+    def power_cycle(self):
+        """Runtime suspend and resume as pvr_power does it: FORCED_IDLE
+        and OFF requests, then the firmware is restarted (not reloaded)."""
+        e = self.emu
+        e.send_kccb(107, [("cmd_data.pow_data.pow_type", 2),
+                          ("cmd_data.pow_data.power_req_data.pow_request_type", 1)])
+        self.kccb_bg()
+        self.settle("forced idle request")
+        e.send_kccb(107, [("cmd_data.pow_data.pow_type", 1),
+                          ("cmd_data.pow_data.power_req_data.forced", 1)])
+        self.kccb_bg()
+        self.settle("power off request")
+        e.set("rogue_fwif_sysinit", fwemu.SYSINIT_VA, "firmware_started", 0)
+        with self.out():
+            e.boot()
+        self.mark("resume (firmware restarted)")
+
     def kccb_bg(self):
         self.emu.pending_tasks.append("bg")
 
@@ -713,6 +730,64 @@ def sc_multikick(r, kicks=3):
     return {"done": done + [frag.done()], "geom_ufo": gq.ufo_value(), "frag_ufo": fq.ufo_value()}
 
 
+def sc_suspend(r, n=3):
+    """Frames with a runtime suspend/resume of the GPU between them: the
+    parameter manager loses its state; free lists must carry on."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    for i in range(2):
+        r.watch_obj("hwrtdata%d" % i, rt.data[i], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.mark("setup")
+    out = []
+    for i in range(n):
+        geom, pr, frag = render_jobs(r, ctx, rt.data[i % 2], 0x10 * i)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("frame %d geometry" % i)
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("frame %d fragment" % i)
+        out.append([geom.done(), pr.done(), frag.done()])
+        if i < n - 1:
+            r.power_cycle()
+    return {"done": out, "geom_ufo": gq.ufo_value(), "frag_ufo": fq.ufo_value()}
+
+
+def sc_power(r):
+    """Kernel CCB maintenance and power commands without jobs: health
+    check, forced idle and cancel, MMU cache flush, log type, number of
+    units, power off and firmware restart."""
+    e = r.emu
+    r.watch_obj("kccb_rtn", e.kccb_rtn, 32)
+    r.mark("setup")
+    sync = e.objects["mmucache_sync"][0]
+    cmds = [("health", 115, []),
+            ("forced idle", 107, [("cmd_data.pow_data.pow_type", 2),
+                                  ("cmd_data.pow_data.power_req_data.pow_request_type", 1)]),
+            ("cancel forced idle", 107, [("cmd_data.pow_data.pow_type", 2),
+                                         ("cmd_data.pow_data.power_req_data.pow_request_type", 2)]),
+            ("mmu cache", 102, [("cmd_data.mmu_cache_data.cache_flags", 0x400001F),
+                                ("cmd_data.mmu_cache_data.mmu_cache_sync_fw_addr", sync),
+                                ("cmd_data.mmu_cache_data.mmu_cache_sync_update_value", 1)]),
+            ("log type", 206, []),
+            ("units", 107, [("cmd_data.pow_data.pow_type", 3),
+                            ("cmd_data.pow_data.power_req_data.num_of_dusts", 1)])]
+    for name, t, fields in cmds:
+        e.send_kccb(t, fields)
+        r.kccb_bg()
+        r.settle(name)
+    r.power_cycle()
+    e.send_kccb(115, [])
+    r.kccb_bg()
+    r.settle("health after restart")
+    return {"rtn": [e.r32(e.kccb_rtn + 4 * i) for i in range(8)], "sync": e.r32(sync)}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -733,6 +808,8 @@ SCENARIOS = {
     "oom-live": sc_oom_live,
     "oom-frames": sc_oom_frames,
     "multikick": sc_multikick,
+    "suspend": sc_suspend,
+    "power": sc_power,
 }
 
 

@@ -21,8 +21,8 @@
 
 #define CONNECTION_FW_ACTIVE	2u
 
-/* kccb_handle(): commands the kernel does not wait for (kicks, grow
- * updates) get no return value */
+/* kccb_handle(): commands the kernel does not wait for through the
+ * return slots (kicks, grow updates, power requests) get no return value */
 #define KCCB_NO_RTN		0xFFFFFFFFu
 
 #define MMUCACHE_BIF_MASK	0xFu	/* PT | PD | PC | TLB1 -> BIF_CTRL_INVAL */
@@ -175,7 +175,7 @@ KSEG0_TEXT void fw_tlb_flush(void)
 static void gpu_mmu_inval(u32 bif_flags)
 {
 	reg_write(CR_SLC_CTRL_FLUSH_INVAL, SLC_FLUSH_INVAL_DM_MMU);
-	poll_reg(CR_SLC_STATUS0, SLC_STATUS0_PENDING, 0);
+	poll_reg(CR_SLC_STATUS0, 0x4, 0);
 	if (bif_flags) {
 		reg_write(CR_BIF_CTRL_INVAL, bif_flags);
 		poll_reg(CR_BIF_CTRL_INVAL, MMUCACHE_BIF_MASK, 0);
@@ -197,6 +197,34 @@ static void cmd_mmucache(u32 cmd)
 		FW32(sync) = FW32(cmd + OFF_KCCB_CMD_CMD_DATA_MMU_CACHE_DATA_MMU_CACHE_SYNC_UPDATE_VALUE);
 }
 
+/* MTS DM0 interrupt routing of GPIO requests (the kernel's GPIO channel) */
+static void gpio_irq_enable(int on)
+{
+	u32 v = reg_read(CR_MTS_DM0_INTERRUPT_ENABLE);
+
+	reg_write(CR_MTS_DM0_INTERRUPT_ENABLE, on ? v | EVENT_GPIO_REQ : v & ~EVENT_GPIO_REQ);
+}
+
+/*
+ * Before the kernel removes power: everything the GPU holds that must
+ * survive goes to memory (parameter manager state, pm_save), the units
+ * are shut down and the SLC written back, then the firmware stops. The
+ * kernel waits for power_sync, checks the GPU is idle and soft-resets
+ * everything, the MIPS core included; the next power-up reboots openfw.
+ */
+static void gpu_power_off(void)
+{
+	gpio_irq_enable(0);
+	pm_save();
+	TRACE(SF_OPENFW_GPU_DEINIT);
+	reg_write(0x6300, 1);
+	reg_write(CR_XPU_BROADCAST, 1);
+	reg_write(CR_EVENT_CLEAR, EVENT_GPIO_REQ | EVENT_GPIO_ACK);
+	reg_write(CR_MTS_UNNAMED_B90, 0x1000);
+	gpio_irq_enable(0);
+	gpu_slc_mmu_flush_nofence(BIF_CTRL_INVAL_PC);
+}
+
 static void cmd_pow(u32 cmd)
 {
 	u32 type = FW32(cmd + OFF_KCCB_CMD_CMD_DATA_POW_DATA_POW_TYPE);
@@ -205,22 +233,19 @@ static void cmd_pow(u32 cmd)
 	switch (type) {
 	case POW_OFF_REQ:
 		TRACE(SF_OPENFW_POW_OFF, arg, 0);
-		/* Nothing runs on the GPU in M0: write back and drop MMU data
-		 * from the SLC, invalidate the page catalogue, then stop. The
-		 * kernel waits for power_sync, checks the GPU is idle and
-		 * soft-resets everything, the MIPS core included. */
-		gpu_mmu_inval(BIF_CTRL_INVAL_PC);
-		TRACE(SF_OPENFW_GPU_DEINIT);
+		gpu_power_off();
 		set_pow_state(POW_OFF);
 		g.halt = 1;
 		break;
 	case POW_FORCED_IDLE_REQ:
 		if (arg == POWER_FORCE_IDLE) {
 			TRACE(SF_OPENFW_POW_IDLE, 0);
+			gpio_irq_enable(0);
 			set_pow_state(POW_FORCED_IDLE);
 		} else {
 			TRACE(SF_OPENFW_POW_CANCEL_IDLE, 0);
 			set_pow_state(POW_IDLE);
+			host_irq();
 		}
 		break;
 	case POW_NUM_UNITS_CHANGE:
@@ -236,13 +261,16 @@ static u32 kccb_handle(u32 cmd, u32 type, u32 slot)
 {
 	switch (type) {
 	case KCCB_HEALTH_CHECK:
-		break;
+		return KCCB_NO_RTN;	/* the kernel only watches kccb_cmds_executed */
 	case KCCB_MMUCACHE:
 		cmd_mmucache(cmd);
 		break;
 	case KCCB_POW:
 		cmd_pow(cmd);
-		break;
+		return KCCB_NO_RTN;	/* the kernel waits for power_sync */
+	case KCCB_FREELISTS_RECONSTRUCTION_UPDATE:
+		/* answers a reconstruction request, which openfw never makes */
+		return KCCB_NO_RTN;
 	case KCCB_LOGTYPE_UPDATE:
 		/* log_type is re-read on every trace */
 		fw_tlb_flush();
@@ -301,8 +329,10 @@ static void kccb_process(void)
 		mips_sync();
 		FW32(ctl + OFF_CCB_CTL_READ_OFFSET) = (ro + 1) & wrap;
 	}
-	if (irq)
+	if (irq) {
 		host_irq();
+		g.kccb_irq = 1;		/* covers an IDLE report in the same task */
+	}
 }
 
 /* ------------------------------------------------------------------------
@@ -312,6 +342,7 @@ static void kccb_process(void)
 static void fw_bg_task(void)
 {
 	TRACE(SF_OPENFW_BG, 0);
+	g.kccb_irq = 0;
 	kccb_process();
 	sched_run();		/* reports IDLE when nothing runs */
 	mts_task_done(MTS_TASK_DONE_BG);
@@ -324,6 +355,7 @@ static void fw_irq_task(void)
 	u32 ev = reg_read(CR_EVENT_STATUS);
 
 	TRACE(SF_OPENFW_IRQ, ev);
+	g.kccb_irq = 0;
 	/* job events are cleared when their job is finished */
 	ev &= ~(EVENT_TA_FINISHED | EVENT_PIXELBE_END_RENDER | EVENT_COMPUTE_FINISHED |
 		EVENT_PM_3D_MEM_FREE | EVENT_PM_OUT_OF_MEMORY);
@@ -336,6 +368,7 @@ static void fw_irq_task(void)
 static void fw_timer(void)
 {
 	mtc0(C0_COMPARE, 0, mfc0(C0_COUNT, 0) + TIMER_PERIOD);
+	g.kccb_irq = 0;
 	kccb_process();		/* safety net for a lost MTS kick */
 	sched_run();
 	if (g.halt)

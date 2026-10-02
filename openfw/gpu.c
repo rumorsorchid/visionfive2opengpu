@@ -128,6 +128,15 @@ void gpu_slc_mmu_flush(u32 bif_flags)
 	poll_reg(0x1348, 1, 0);
 }
 
+/* The same without the 0x1348 step (power-off) */
+void gpu_slc_mmu_flush_nofence(u32 bif_flags)
+{
+	reg_write(CR_SLC_CTRL_FLUSH_INVAL, SLC_FLUSH_INVAL_DM_MMU);
+	poll_reg(CR_SLC_STATUS0, 0x4, 0);
+	reg_write(CR_BIF_CTRL_INVAL, bif_flags);
+	poll_reg(CR_BIF_CTRL_INVAL, bif_flags, 0);
+}
+
 void gpu_slc_flush(u32 bits)
 {
 	reg_write(CR_SLC_CTRL_FLUSH_INVAL, bits);
@@ -205,7 +214,11 @@ u32 memctx_activate(u32 memctx, u32 dm)
 	u64 pc = fw_read64(memctx + OFF_FWMEMCONTEXT_PC_DEV_PADDR);
 	u32 set = FW32(memctx + OFF_FWMEMCONTEXT_PAGE_CAT_BASE_REG_SET);
 	u32 mc = multicore_ctrl_reg(dm);
-	int loaded = set < PC_SETS && pcset[set].used && pcset[set].pc == pc;
+	/* still loaded if the set the context last had holds its catalogue
+	 * (the set number lives in the FW memory context, which survives a
+	 * firmware restart; a powered-down GPU reads back 0) */
+	int loaded = set < PC_SETS && (!pcset[set].used || pcset[set].pc == pc) &&
+		     reg_read64(CR_BIF_CAT_BASE0 + 8 * (set + 1)) == pc;
 	u64 idx;
 	u32 lo;
 
@@ -215,8 +228,9 @@ u32 memctx_activate(u32 memctx, u32 dm)
 			(void)reg_read(mc);
 	}
 
-	if (loaded && reg_read64(CR_BIF_CAT_BASE0 + 8 * (set + 1)) == pc) {
-		/* still loaded */
+	if (loaded) {
+		pcset[set].pc = pc;
+		pcset[set].used = 1;
 	} else {
 		u32 i, n;
 

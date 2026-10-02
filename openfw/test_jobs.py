@@ -28,6 +28,7 @@ import spec  # noqa: E402
 
 # (name, scenario, scenario inputs)
 CASES = [
+    ("power", "power", {}),
     ("compute", "compute", {}),
     ("compute-chained", "compute2", {}),
     ("transfer", "transfer", {}),
@@ -52,6 +53,8 @@ CASES = [
     ("oom-status", "oom", {"oom": 1, "oom_regs": {0x20c8: 5, 0x20d8: 7, 0x20e0: 9,
                                                   0x348: 11, 0x3a0: 13, 0x2000: 15}}),
     ("multikick", "multikick", {}),
+    ("suspend", "suspend", {}),
+    ("suspend-status", "suspend", {"status_tags": 1}),
     ("multikick-status", "multikick", {"status_tags": 1}),
     ("oom-live", "oom-live", {"oom": 1}),
     ("oom-frames", "oom-frames", {}),

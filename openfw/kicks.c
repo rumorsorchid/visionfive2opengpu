@@ -200,6 +200,9 @@ static u32 pm_loaded_fl[2][2];
 /* HWRT data whose geometry finished and whose 3D pass has not started */
 static u32 pm_pending_hwrt, pm_pending_stored;
 
+/* HWRT data last loaded on PM context 1 (3D) */
+static u32 pm_3d_hwrt;
+
 /* TA stalled out of memory until this free list grows (oom_geom) */
 static u32 oom_wait_fl, oom_wait_kind;
 
@@ -238,6 +241,32 @@ static void pm_store_freelist(u32 pmctx, u32 kind, u32 fl)
 	FW32(fl + OFF_FREELIST_ALLOCATED_PAGE_COUNT) = reg_read(pm_fl_status[pmctx][kind].pages);
 	FW32(fl + OFF_FREELIST_ALLOCATED_MMU_PAGE_COUNT) =
 		reg_read(pm_fl_status[pmctx][kind].mmu_pages);
+}
+
+/*
+ * Before power-off: free lists from PM context 0, the render state of the
+ * HWRT data last on PM context 1 (and of a render whose 3D pass has not
+ * started), then the free lists from context 1 (the latest copy).
+ */
+void pm_save(void)
+{
+	for (u32 k = 0; k < 2; k++)
+		if (pm_loaded_fl[0][k])
+			pm_store_freelist(0, k, pm_loaded_fl[0][k]);
+	if (pm_pending_hwrt && !pm_pending_stored)
+		pm_store_rtdata(pm_pending_hwrt);
+	if (pm_3d_hwrt) {
+		u32 h = pm_3d_hwrt;
+
+		FW32(h + OFF_HWRTDATA_PM_MLIST_STACK_POINTER) = reg_read(0x02D0);
+		fw_write64(h + OFF_HWRTDATA_PM_ALIST_STACK_POINTER, reg_read64(0x0280));
+		fw_write64(h + OFF_HWRTDATA_VCE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_VCE1));
+		fw_write64(h + OFF_HWRTDATA_TE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_TE1));
+		fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST1));
+	}
+	for (u32 k = 0; k < 2; k++)
+		if (pm_loaded_fl[1][k])
+			pm_store_freelist(1, k, pm_loaded_fl[1][k]);
 }
 
 /*
@@ -283,6 +312,7 @@ void pm_reset(void)
 	for (u32 c = 0; c < 2; c++)
 		pm_loaded_fl[c][0] = pm_loaded_fl[c][1] = 0;
 	pm_pending_hwrt = pm_pending_stored = 0;
+	pm_3d_hwrt = 0;
 	oom_wait_fl = 0;
 }
 
@@ -628,6 +658,7 @@ void kick_frag(struct job *j)
 	reg_write(0x01C8, 0);
 
 	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_KICK_FRAG;
+	pm_3d_hwrt = h;
 	TRACE(SF_OPENFW_KICK_3D, j->ctx, j->cmd - FW32(j->ctx + OFF_FWCOMMONCONTEXT_CCB_FW_ADDR), h,
 	      j->type == CCB_FRAG_PR, 0, ctx_pid(j->ctx), FW32(j->ctx + OFF_FWCOMMONCONTEXT_PRIORITY),
 	      FW32(p + OFF_CMD_FRAG_CMD_SHARED_CMN_FRAME_NUM), job_ref(j), job_ref(j));

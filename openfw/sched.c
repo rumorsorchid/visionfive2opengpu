@@ -369,7 +369,8 @@ void sched_run(void)
 	if (sched_idle() && pow_state() == POW_ON) {
 		/* Idle: let the kernel power the GPU down. */
 		set_pow_state(POW_IDLE);
-		host_irq();
+		if (!g.kccb_irq)
+			host_irq();
 	}
 }
 
