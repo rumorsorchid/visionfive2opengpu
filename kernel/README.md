@@ -52,7 +52,7 @@ carries the on-list series:
 | 36 | D. Belhachemi | **remap links split VAs to the wrong `vm_bo`** (NULL deref on partial unmap: `gpuvm_bo` is only set for map ops) | real upstream bug on every PowerVR SoC; squash with 37, add Fixes: |
 | 37 | D. Belhachemi | **remap leaks a GEM reference per split** | real upstream bug; squash with 36 |
 | 38 | D. Belhachemi | 8 MiB guard BO above the PDS/USC heap high-water marks | empirical workaround, see docs §6 |
-| 39 | D. Belhachemi | don't send CLEANUP for a context with jobs in flight | workaround |
+| 39 | D. Belhachemi | don't send CLEANUP for a context with jobs in flight | workaround; the context is freed either way, which no firmware survives if it still holds it. Should not trigger: jobs hold context references until they complete, and with openfw's in-firmware recovery even a hung job completes |
 | 40 | new | POWER_EVENT sequence taken from the firmware's own routine; `jh7110_power_event` selector; `rd_power_island` parameter (`POW_RASCALDUST`) | depends on `board/power-ab-test.sh` results |
 | 41 | new | kernel-doc fix + param description for 38 | fold into 38 |
 
