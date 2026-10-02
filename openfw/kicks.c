@@ -191,6 +191,9 @@ static u32 pm_loaded_fl[2][2];
 /* HWRT data whose geometry finished and whose 3D pass has not started */
 static u32 pm_pending_hwrt, pm_pending_stored;
 
+/* TA stalled out of memory until this free list grows (oom_geom) */
+static u32 oom_wait_fl, oom_wait_kind;
+
 /* After the TA: what PM context 0 built for this render target. */
 static void pm_store_rtdata(u32 h)
 {
@@ -271,6 +274,117 @@ void pm_reset(void)
 	for (u32 c = 0; c < 2; c++)
 		pm_loaded_fl[c][0] = pm_loaded_fl[c][1] = 0;
 	pm_pending_hwrt = pm_pending_stored = 0;
+	oom_wait_fl = 0;
+}
+
+/* -- parameter memory exhaustion (PM out of memory) ---------------------------- */
+
+/*
+ * When the TA's free lists run dry the PM raises PM_OUT_OF_MEMORY and the
+ * TA stalls. The growable free list (the global one when there is one)
+ * keeps "ready pages" the kernel reserved at its last grow: they are handed
+ * to the PM at once and the TA resumes, while a FREELIST_GROW request asks
+ * the kernel for more (pvr_free_list_process_grow_req). Without ready
+ * pages the TA stays stalled until the kernel's FREELIST_GROW_UPDATE.
+ *
+ * Not handled: a free list that cannot grow any more with no ready pages
+ * left. Imagination's firmware then runs a partial render to free memory;
+ * openfw leaves the TA stalled and the kernel's job timeout resets the GPU.
+ */
+
+static void pm_pause_ta_alloc(int pause)
+{
+	u32 v = reg_read(0x02A0);		/* PM_PAGE_MANAGEOP */
+
+	reg_write(0x02A0, pause ? v | 1 : v & ~1u);
+	poll_reg(0x02A8, 1, pause ? 1 : 0);
+}
+
+/* Add @pages pages below the current base of free list @fl in PM context 0. */
+static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
+{
+	const struct pm_fl_regs *r = &pm_fl[0][kind];
+	u32 top = reg_read(pm_fl_status[0][kind].top) + pages;
+	u32 alloc = reg_read(pm_fl_status[0][kind].pages);
+	u32 mmu = reg_read(pm_fl_status[0][kind].mmu_pages);
+	u64 base = fw_read64(fl + OFF_FREELIST_CURRENT_DEV_ADDR) - (u64)pages * 4;
+	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES) + pages;
+
+	pm_pause_ta_alloc(1);
+	reg_write64(r->base, base);
+	if (r->top_shift == 32)
+		reg_write64(r->top, (u64)top << 32);
+	else
+		reg_write(r->top, top);
+	reg_write(r->pages, alloc);
+	reg_write(r->mmu_pages, mmu);
+	reg_write(r->load, 1);
+	poll_reg(r->load, 1, 0);
+	pm_pause_ta_alloc(0);
+
+	fw_write64(fl + OFF_FREELIST_CURRENT_DEV_ADDR, base);
+	FW32(fl + OFF_FREELIST_CURRENT_PAGES) = cur;
+	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = cur - 1;
+	FW32(fl + OFF_FREELIST_READY_PAGES) = 0;
+	TRACE(SF_OPENFW_OOM_RESUMED, (u32)(base >> 32), (u32)base, cur, cur - 1);
+	reg_write(0x0328, 1);			/* resume the TA */
+}
+
+void oom_geom(struct job *j)
+{
+	u32 h = j->hwrt;
+	u32 kind = hwrt_freelist(h, 1) ? 1 : 0;
+	u32 fl = hwrt_freelist(h, kind);
+	u32 ready = FW32(fl + OFF_FREELIST_READY_PAGES);
+	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES);
+
+	reg_write(CR_EVENT_CLEAR, EVENT_PM_OUT_OF_MEMORY);
+	TRACE(SF_OPENFW_OOM, j->ctx, h);
+	if (ready) {
+		pm_grow_ta(kind, fl, ready);
+		cur += ready;
+		gpu_dm_fence(DM_GEOM);
+		gpu_slc_flush(0x2);
+		gpu_slc_flush(0x6);
+	} else {
+		oom_wait_fl = fl;
+		oom_wait_kind = kind;
+		FW32(h + OFF_HWRTDATA_STATE) = RTDATA_GEOM_OUTOFMEM;
+	}
+	if (!FW32(fl + OFF_FREELIST_GROW_PENDING) && FW32(fl + OFF_FREELIST_GROW_PAGES) &&
+	    cur < FW32(fl + OFF_FREELIST_MAX_PAGES)) {
+		FW32(fl + OFF_FREELIST_GROW_PENDING) = 1;
+		fwccb_send(FWCCB_FREELIST_GROW, FW32(fl + OFF_FREELIST_FREELIST_ID), 0, 0);
+	}
+	fwccb_send(FWCCB_UPDATE_STATS, FWCCB_STATS_NUM_OUT_OF_MEMORY, ctx_pid(j->ctx), 1);
+}
+
+/* KCCB FREELIST_GROW_UPDATE: the kernel added pages to a free list. */
+void freelist_grow_update(u32 d)
+{
+	u32 fl = FW32(d + OFF_FREELIST_GS_DATA_FREELIST_FW_ADDR);
+	u32 newp = FW32(d + OFF_FREELIST_GS_DATA_NEW_PAGES);
+	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES);
+	u64 base = fw_read64(fl + OFF_FREELIST_CURRENT_DEV_ADDR);
+
+	TRACE(SF_OPENFW_GROW_UPDATE, (u32)(base >> 32), (u32)base, newp,
+	      FW32(d + OFF_FREELIST_GS_DATA_READY_PAGES));
+	FW32(fl + OFF_FREELIST_GROW_PENDING) = 0;
+	if (newp <= cur)
+		return;				/* the grow failed */
+	if (oom_wait_fl == fl && sched_dm_busy(DM_GEOM)) {
+		/* the stalled TA gets the new pages now, but for the ready
+		 * pages the kernel keeps in reserve for the next OOM */
+		u32 ready = FW32(d + OFF_FREELIST_GS_DATA_READY_PAGES);
+		u32 add = newp - cur > ready ? newp - cur - ready : newp - cur;
+
+		oom_wait_fl = 0;
+		pm_grow_ta(oom_wait_kind, fl, add);
+		FW32(fl + OFF_FREELIST_READY_PAGES) = newp - cur - add;
+		FW32(sched_running_hwrt(DM_GEOM) + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
+	} else {
+		FW32(fl + OFF_FREELIST_READY_PAGES) = newp - cur;
+	}
 }
 
 /* -- geometry ------------------------------------------------------------------ */

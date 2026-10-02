@@ -56,6 +56,11 @@ static inline __attribute__((always_inline)) u64 reg_read64(u32 off)
 #define KCCB_COMBINED_KICK	(117u | CMD_MAGIC)
 #define KCCB_LOGTYPE_UPDATE	(206u | CMD_MAGIC)
 
+/* enum rogue_fwif_fwccb_cmd_type */
+#define FWCCB_FREELIST_GROW	(103u | CMD_MAGIC)
+#define FWCCB_UPDATE_STATS	(107u | CMD_MAGIC)
+#define FWCCB_STATS_NUM_OUT_OF_MEMORY 2u
+
 #define KCCB_RTN_CMD_EXECUTED	(1u << 0)
 #define KCCB_RTN_CLEANUP_BUSY	(1u << 1)
 
@@ -140,12 +145,14 @@ void set_pow_state(u32 s);
 u32 pow_state(void);
 void fw_tlb_flush(void);
 void mts_schedule(u32 v);
+void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2);
 
 /* -- gpu.c ------------------------------------------------------------------ */
 extern u32 gpu_units_on;
 void gpu_units_init(void);
 void gpu_cancel_power_off(void);
 void gpu_slc_mmu_flush(u32 bif_flags);
+void gpu_slc_flush(u32 bits);
 void gpu_dm_fence(u32 dm);
 u32 memctx_activate(u32 memctx, u32 dm);
 void memctx_deactivate(u32 memctx, u32 dm);
@@ -158,6 +165,7 @@ void sched_irq(void);
 u32 sched_cleanup(u32 type, u32 addr);
 int sched_idle(void);
 int sched_dm_busy(u32 dm);
+u32 sched_running_hwrt(u32 dm);
 void sched_reset(void);
 
 struct job {
@@ -183,5 +191,7 @@ void finish_frag(struct job *j);
 int frag_pr_needed(struct job *j);
 void pm_reset(void);
 void pm_unload_freelists(u32 fl);
+void oom_geom(struct job *j);
+void freelist_grow_update(u32 data);
 
 #endif

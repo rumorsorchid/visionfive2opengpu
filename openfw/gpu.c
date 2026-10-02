@@ -128,6 +128,12 @@ void gpu_slc_mmu_flush(u32 bif_flags)
 	poll_reg(0x1348, 1, 0);
 }
 
+void gpu_slc_flush(u32 bits)
+{
+	reg_write(CR_SLC_CTRL_FLUSH_INVAL, bits);
+	poll_reg(CR_SLC_STATUS0, 0x4, 0);
+}
+
 /* -- end-of-job fence ---------------------------------------------------------- */
 
 /*

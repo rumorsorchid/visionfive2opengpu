@@ -59,6 +59,11 @@ int sched_dm_busy(u32 dm)
 	return running[dm].ctx != 0;
 }
 
+u32 sched_running_hwrt(u32 dm)
+{
+	return running[dm].hwrt;
+}
+
 /* No job on any data master (contexts blocked on fences do not count). */
 int sched_idle(void)
 {
@@ -419,6 +424,9 @@ static const struct {
 void sched_irq(void)
 {
 	u32 ev = reg_read(CR_EVENT_STATUS);
+
+	if ((ev & EVENT_PM_OUT_OF_MEMORY) && running[DM_GEOM].ctx)
+		oom_geom(&running[DM_GEOM]);
 
 	for (u32 i = 0; i < sizeof(dm_events) / sizeof(dm_events[0]); i++) {
 		u32 dm = dm_events[i].dm;

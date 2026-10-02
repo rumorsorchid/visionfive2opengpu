@@ -21,7 +21,8 @@
 
 #define CONNECTION_FW_ACTIVE	2u
 
-/* kccb_handle(): kicks have no return value; the kernel does not wait */
+/* kccb_handle(): commands the kernel does not wait for (kicks, grow
+ * updates) get no return value */
 #define KCCB_NO_RTN		0xFFFFFFFFu
 
 #define MMUCACHE_BIF_MASK	0xFu	/* PT | PD | PC | TLB1 -> BIF_CTRL_INVAL */
@@ -115,6 +116,27 @@ void host_irq(void)
 {
 	mips_sync();
 	reg_write(CR_MIPS_WRAPPER_IRQ_STATUS, 1);
+}
+
+/* Post a command to the kernel's firmware CCB (pvr_fwccb_process). */
+void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2)
+{
+	u32 ctl = g.fwccb_ctl;
+	u32 wo = FW32(ctl + OFF_CCB_CTL_WRITE_OFFSET);
+	u32 wrap = FW32(ctl + OFF_CCB_CTL_WRAP_MASK);
+	u32 cmd = g.fwccb + wo * SIZEOF_FWCCB_CMD;
+
+	if (((wo + 1) & wrap) == FW32(ctl + OFF_CCB_CTL_READ_OFFSET))
+		return;				/* full: the kernel is not reading */
+	for (u32 i = 0; i < SIZEOF_FWCCB_CMD; i += 4)
+		FW32(cmd + i) = 0;
+	FW32(cmd + OFF_FWCCB_CMD_CMD_TYPE) = type;
+	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA) = a0;
+	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA + 4) = a1;
+	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA + 8) = a2;
+	mips_sync();
+	FW32(ctl + OFF_CCB_CTL_WRITE_OFFSET) = (wo + 1) & wrap;
+	host_irq();
 }
 
 /* Tell the MTS the current task has finished (the write is read back). */
@@ -232,6 +254,9 @@ static u32 kccb_handle(u32 cmd, u32 type, u32 slot)
 		/* geometry and fragment kick data, back to back */
 		sched_kick(cmd + OFF_KCCB_CMD_CMD_DATA);
 		sched_kick(cmd + OFF_KCCB_CMD_CMD_DATA + SIZEOF_KCCB_CMD_KICK_DATA);
+		return KCCB_NO_RTN;
+	case KCCB_FREELIST_GROW_UPDATE:
+		freelist_grow_update(cmd + OFF_KCCB_CMD_CMD_DATA_FREE_LIST_GS_DATA);
 		return KCCB_NO_RTN;
 	case KCCB_CLEANUP:
 		return sched_cleanup(FW32(cmd + OFF_KCCB_CMD_CMD_DATA + OFF_CLEANUP_REQUEST_CLEANUP_TYPE),
@@ -428,6 +453,8 @@ void __attribute__((noreturn)) fw_main(void)
 	g.kccb_ctl = FW32(osinit + OFF_OSINIT_KERNEL_CCBCTL_FW_ADDR);
 	g.kccb = FW32(osinit + OFF_OSINIT_KERNEL_CCB_FW_ADDR);
 	g.kccb_rtn = FW32(osinit + OFF_OSINIT_KERNEL_CCB_RTN_SLOTS_FW_ADDR);
+	g.fwccb_ctl = FW32(osinit + OFF_OSINIT_FIRMWARE_CCBCTL_FW_ADDR);
+	g.fwccb = FW32(osinit + OFF_OSINIT_FIRMWARE_CCB_FW_ADDR);
 	g.osdata = FW32(osinit + OFF_OSINIT_FW_OS_DATA_FW_ADDR);
 	g.power_sync = FW32(g.osdata + OFF_OSDATA_POWER_SYNC_FW_ADDR);
 	g.sysdata = FW32(sysinit + OFF_SYSINIT_FW_SYS_DATA_FW_ADDR);

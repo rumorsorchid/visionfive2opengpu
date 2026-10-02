@@ -34,6 +34,8 @@ KCCB_MMUCACHE = 102
 KCCB_CLEANUP = 106
 KCCB_FREELIST_GROW_UPDATE = 110
 KCCB_COMBINED_KICK = 117
+FWCCB_FREELIST_GROW = 103 | MAGIC
+FWCCB_UPDATE_STATS = 107 | MAGIC
 
 CLEANUP_FWCOMMONCONTEXT, CLEANUP_HWRTDATA, CLEANUP_FREELIST = 0, 1, 2
 
@@ -134,6 +136,24 @@ class FreeList:
                         ("freelist_dev_addr", gpu_addr), ("current_dev_addr", cur_dev)):
             host.set(F, self.fw, path, v)
         self.current_pages, self.ready_pages = current, ready
+
+    def process_grow_req(self):
+        """pvr_free_list_process_grow_req: the FW used the ready pages;
+        grow by grow_pages if allowed and answer with FREELIST_GROW_UPDATE."""
+        h = self.host
+        self.current_pages += self.ready_pages
+        self.ready_pages = 0
+        grow = 0
+        if self.grow_pages and self.current_pages + self.grow_pages <= self.max_pages:
+            self.current_pages += self.grow_pages
+            grow = self.grow_pages
+            self.ready_pages = self.ready_pages_for(self.current_pages)
+            self.current_pages -= self.ready_pages
+        p = "cmd_data.free_list_gs_data."
+        return h.emu.send_kccb(KCCB_FREELIST_GROW_UPDATE, [
+            (p + "freelist_fw_addr", self.fw), (p + "delta_pages", grow),
+            (p + "new_pages", self.current_pages + self.ready_pages),
+            (p + "ready_pages", self.ready_pages)])
 
     def ready_pages_for(self, pages):
         ready = pages * self.grow_threshold // 100
@@ -236,6 +256,7 @@ class Host:
         self.next_ctx_id = 1
         self.next_job_id = 1
         self.next_fl_id = 1
+        self.free_lists = {}
         self.vms = []
 
     def fw_obj(self, name, size):
@@ -349,8 +370,36 @@ class Host:
     def free_list(self, vm, gpu_addr=0xE200000000, initial=256, max_pages=4096, grow=64,
                   threshold=13):
         fl = FreeList(self, vm, gpu_addr, initial, max_pages, grow, threshold, self.next_fl_id)
+        self.free_lists[self.next_fl_id] = fl
         self.next_fl_id += 1
         return fl
+
+    # -- firmware CCB (pvr_fwccb_process) ------------------------------------------------
+    def fwccb_process(self):
+        """Consume pending FWCCB commands like the kernel; answer free list
+        grow requests. Returns the commands as (type, {field: value})."""
+        e, C = self.emu, "rogue_fwif_fwccb_cmd"
+        size = self.L.size(C)
+        out = []
+        while True:
+            ro = self.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "read_offset")
+            wo = self.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "write_offset")
+            if ro == wo:
+                return out
+            cmd = e.fwccb + ro * size
+            t = self.get(C, cmd, "cmd_type")
+            wrap = self.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "wrap_mask")
+            self.set("rogue_fwif_ccb_ctl", e.fwccb_ctl, "read_offset", (ro + 1) & wrap)
+            info = {}
+            if t == FWCCB_FREELIST_GROW:
+                fid = self.get(C, cmd, "cmd_data.cmd_free_list_gs.freelist_id")
+                info["freelist_id"] = fid
+                if fid in self.free_lists:
+                    info["kccb_slot"] = self.free_lists[fid].process_grow_req()
+            elif t == FWCCB_UPDATE_STATS:
+                for f in ("element_to_update", "pid_owner", "adjustment_value"):
+                    info[f] = self.get(C, cmd, "cmd_data.cmd_update_stats_data." + f)
+            out.append((t, info))
 
     def hwrt(self, free_lists, width=1920, height=1080, **kw):
         return HWRT(self, free_lists, width, height, **kw)

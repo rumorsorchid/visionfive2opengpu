@@ -839,6 +839,9 @@
 #define SF_OPENFW_UFO_CHECK 0x70031013U /* "UFO PR-Check: [0x%08.8x] is 0x%08.8x requires >= 0x%08.8x" */
 #define SF_OPENFW_UFO_UPDATE 0x70021017U /* "UFO Update: [0x%08.8x] = 0x%08.8x" */
 #define SF_OPENFW_MEMCTX 0x7003800eU /* "Activate MemCtx=0x%08x DM=%d secure=%d" */
+#define SF_OPENFW_OOM 0x7002100bU /* "Out of memory! Context 0x%08x, HWRTData 0x%x" */
+#define SF_OPENFW_OOM_RESUMED 0x7004602cU /* "OOM: Resumed TA with ready pages, FL addr: 0x%02x%08x, current pages: %u, SP : %u" */
+#define SF_OPENFW_GROW_UPDATE 0x70046036U /* "Received grow update, FL addr: 0x%02x%08x, new pages: %u, ready pages: %u" */
 #define SF_OPENFW_FL_GROW 0x70054005U /* "Freelist grow completed [0x%08x]: added pages 0x%08x, total pages 0x%08x, new DevVirtAddr 0x%08x%08x" */
 
 #endif

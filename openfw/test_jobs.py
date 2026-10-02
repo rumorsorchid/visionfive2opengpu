@@ -47,6 +47,18 @@ CASES = [
     ("teardown", "teardown", {}),
     ("mixed", "mixed", {}),
     ("wrap", "wrap", {}),
+    ("oom", "oom", {"oom": 1}),
+    ("oom-status", "oom", {"oom": 1, "oom_regs": {0x20c8: 5, 0x20d8: 7, 0x20e0: 9,
+                                                  0x348: 11, 0x3a0: 13, 0x2000: 15}}),
+]
+
+# Cases where openfw deliberately takes another route than the reference
+# (a TA out of memory with no ready pages waits for the grow instead of
+# being stored for a possible partial render): only the results and the
+# memory both leave behind at the end are compared.
+OUTCOME_CASES = [
+    ("oom-twice", "oom", {"oom": 2}),
+    ("oom-noready", "oom", {"oom": 1, "fl_threshold": 0}),
 ]
 
 
@@ -66,6 +78,28 @@ def fmt(r, a):
     if k == "P":
         return "P %-28s +0x%05x & 0x%08x == 0x%08x" % (r.reg_name(off), off, v[1], v[0])
     return "W %-28s +0x%05x = 0x%08x" % (r.reg_name(off), off, v)
+
+
+def compare_outcome(name, a, b):
+    (ra, sa, _), (rb, sb, _) = a, b
+    errors = []
+    if ra != rb:
+        errors.append("result: openfw %s, reference %s" % (ra, rb))
+    final_a, final_b = {}, {}
+    for _, _, mem in sa:
+        final_a.update(mem)
+    for _, _, mem in sb:
+        final_b.update(mem)
+    for obj in sorted(set(final_a) | set(final_b)):
+        da, db = final_a.get(obj, b""), final_b.get(obj, b"")
+        for off in range(0, max(len(da), len(db)), 4):
+            if da[off:off + 4] != db[off:off + 4]:
+                errors.append("final %s +0x%03x: openfw %s, reference %s" % (
+                    obj, off, da[off:off + 4][::-1].hex(), db[off:off + 4][::-1].hex()))
+    print("%-18s %s" % (name, "ok (outcome)" if not errors else "FAIL"))
+    for e in errors:
+        print("    " + e)
+    return not errors
 
 
 def compare(name, a, b, verbose):
@@ -117,6 +151,11 @@ def main():
         a = run(args.openfw, args.kernel, sc, params)
         b = run(args.reference, args.kernel, sc, params)
         ok &= compare(name, a, b, args.verbose)
+    for name, sc, params in OUTCOME_CASES:
+        if args.only and not any(s in name for s in args.only):
+            continue
+        ok &= compare_outcome(name, run(args.openfw, args.kernel, sc, params),
+                              run(args.reference, args.kernel, sc, params))
     return 0 if ok else 1
 
 

@@ -141,6 +141,9 @@ TRACE = {
     "OPENFW_UFO_CHECK": "UFO PR-Check: [0x%08.8x] is 0x%08.8x requires >= 0x%08.8x",
     "OPENFW_UFO_UPDATE": ("UFO Update: [0x%08.8x] = 0x%08.8x", 0),
     "OPENFW_MEMCTX": "Activate MemCtx=0x%08x DM=%d secure=%d",
+    "OPENFW_OOM": "Out of memory! Context 0x%08x, HWRTData 0x%x",
+    "OPENFW_OOM_RESUMED": "OOM: Resumed TA with ready pages, FL addr: 0x%02x%08x, current pages: %u, SP : %u",
+    "OPENFW_GROW_UPDATE": "Received grow update, FL addr: 0x%02x%08x, new pages: %u, ready pages: %u",
     "OPENFW_FL_GROW": "Freelist grow completed [0x%08x]: added pages 0x%08x, total pages 0x%08x, "
                       "new DevVirtAddr 0x%08x%08x",
 }

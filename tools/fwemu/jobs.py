@@ -92,6 +92,8 @@ class Runner:
         self.watch = {}
         self.kicks = []          # kicks in the current step (reports)
         self._kick_hist = []     # every kick, completed in order by the model
+        self.oom_left = self.p["oom"]
+        self.ta_stalled = False
         orig = self.emu.reg_model_write
 
         def model_write(off, value):
@@ -100,6 +102,8 @@ class Runner:
             if o in KICKS and value & 1:
                 self.kicks.append(o)
                 self._kick_hist.append(o)
+            if o == 0x0328 and value & 1:
+                self.ta_stalled = False      # TA resumed after out-of-memory
         self.emu.reg_model_write = model_write
 
     def out(self):
@@ -176,8 +180,29 @@ class Runner:
         if done >= len(self.all_kicks()):
             return False
         off = self.all_kicks()[done]
+        if KICKS[off][0] == "TA" and self.ta_stalled:
+            # a stalled TA only completes after the firmware resumes it;
+            # complete the next other kick instead
+            for i in range(done + 1, len(self._kick_hist)):
+                if KICKS[self._kick_hist[i]][0] != "TA":
+                    self._kick_hist.insert(done, self._kick_hist.pop(i))
+                    off = self._kick_hist[done]
+                    break
+            else:
+                return False
         self._done_kicks = done + 1
         dm, bits = KICKS[off]
+        if dm == "TA" and self.oom_left:
+            # the PM runs out of free list pages: the TA stalls (kick not
+            # complete; it goes to the back of the queue)
+            self.oom_left -= 1
+            self._done_kicks = done
+            self.ta_stalled = True
+            for reg, v in self.p["oom_regs"].items():
+                self.emu.regs[reg] = v
+            self.emu.event_status |= 1 << 7          # PM_OUT_OF_MEMORY
+            self.emu.pending_tasks.append("irq")
+            return True
         if self.p.get("status_tags"):
             for reg in STATUS_REGS.get(dm, ()):
                 self.emu.regs[reg] = 0x7E000000 | reg
@@ -229,13 +254,15 @@ DEFAULT_PARAMS = {
     "shift": 0,                       # extra FW heap allocation before the scenario
     "pc": 0x90000000,                 # page catalogue physical address of the VM
     "fl_addr": 0xE200000000, "fl_initial": 256, "fl_max": 4096, "fl_grow": 64,
-    "gfl_addr": 0xE210000000,
+    "gfl_addr": 0xE210000000, "fl_threshold": 13,
     "width": 1920, "height": 1080, "samples": 1,
     "callstack": 0xE300000000,
     "geom": {}, "rt": None,
     "status_tags": 0,
     "override": {},                  # {struct name: {field path: value}}
     "reg_init": {},                  # {register offset: power-on value}
+    "oom": 0,                        # PM out-of-memory events raised during TAs
+    "oom_regs": {},                  # {register: value} set with each OOM event
 }
 
 
@@ -363,9 +390,9 @@ def new_render(r, vm=None, data_sets=1):
     vm = vm or h.vm_context(p["pc"])
     ctx = h.render_context(vm, callstack_addr=p["callstack"])
     fl = h.free_list(vm, gpu_addr=p["fl_addr"], initial=p["fl_initial"], max_pages=p["fl_max"],
-                     grow=p["fl_grow"])
+                     grow=p["fl_grow"], threshold=p["fl_threshold"])
     gfl = h.free_list(vm, gpu_addr=p["gfl_addr"], initial=p["fl_initial"],
-                      max_pages=p["fl_max"], grow=p["fl_grow"])
+                      max_pages=p["fl_max"], grow=p["fl_grow"], threshold=p["fl_threshold"])
     rts = [h.hwrt([fl, gfl], width=p["width"], height=p["height"], samples=p["samples"],
                   geom=p["geom"], rt=p["rt"]) for _ in range(data_sets)]
     return ctx, fl, gfl, rts
@@ -566,6 +593,38 @@ def sc_mixed(r):
     return {"done": [cj.done(), geom.done(), pr.done(), t.done(), frag.done()]}
 
 
+def sc_oom(r):
+    """A render whose TA runs out of parameter memory: the kernel answers
+    the firmware's free list grow requests like pvr_free_list_process_grow_req."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("fwccb_ctl", r.emu.fwccb_ctl, 16)
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 16)
+    r.mark("setup")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    fw_cmds = []
+    for i in range(8):
+        r.settle("geometry %d" % i, complete=True)
+        cmds = h.fwccb_process()
+        fw_cmds += cmds
+        if not cmds:
+            break
+        r.kccb_bg()
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"done": [geom.done(), pr.done(), frag.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw_cmds]}
+
+
 SCENARIOS = {
     "compute": lambda r: sc_compute(r),
     "compute2": lambda r: sc_compute(r, n=2, chained=True),
@@ -582,6 +641,7 @@ SCENARIOS = {
     "cleanup-busy": sc_cleanup_busy,
     "teardown": sc_teardown,
     "mixed": sc_mixed,
+    "oom": sc_oom,
 }
 
 
