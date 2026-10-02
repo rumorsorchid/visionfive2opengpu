@@ -6,17 +6,20 @@ core inside the GPU. The upstream Linux `powervr` driver loads it from
 binary. `openfw/` is a from-scratch, MIT-licensed replacement, built with
 an ordinary GCC cross compiler and packed into the same container format.
 
-**Status: executes GPU jobs (milestones M0–M3, most of M4); verified in
-emulation against Imagination's firmware, not yet run on a board.**
+**Status: feature-complete for the upstream driver and Mesa (milestones
+M0–M4); verified in emulation against Imagination's firmware, not yet run
+on a board.**
 
 It schedules and runs everything the upstream driver and Mesa submit:
 compute, transfer (blits), geometry and fragment jobs, with fences,
 several contexts and VMs, context priorities, concurrent data masters,
 geometry split over several kicks, parameter-buffer growth when a render
-runs out of memory, occlusion queries, MSAA, depth/stencil load/store,
-context and render-target teardown, and runtime suspend/resume of the GPU
-with all parameter-manager state preserved. 15 KiB of code, 544 bytes of
-RAM.
+runs out of memory, **partial renders when it cannot grow any more**,
+occlusion queries, MSAA, depth/stencil load/store, context and
+render-target teardown, runtime suspend/resume of the GPU with all
+parameter-manager state preserved, and **hardware recovery**: lockup and
+overrun detection, GPU page-fault reporting, GPU reset and free-list
+reconstruction. 18 KiB of code, 1.3 KiB of RAM.
 
 What it does not do yet is listed under [Limitations](#limitations).
 
@@ -31,26 +34,45 @@ now.
 | Container + device info accepted by the driver's parser | `tools/pvrfw.py pack --compare` | device info byte-identical to Imagination's; re-packing Imagination's own ELF reproduces their file byte for byte |
 | Boot-time register programming | `tools/fwemu --trace-regs`, diffed against the reference | identical |
 | Kernel contract: probe, health check, MMU flush, log type, forced idle, power off, resume | `test_contract.py` (25 checks, the driver's own sequence) | all pass, as for Imagination's image |
-| GPU jobs and power, step by step | `test_jobs.py`: 32 scenarios, both firmwares, same kernel structures and hardware model | **identical register writes, polls, host-visible memory and results** in all 32 |
-| Every userspace command field and kernel flag | `test_jobs.py --sweep`: each field of `pvr_stream_defs.c` and each kernel-settable flag bit set to bit patterns | **406 of 406** identical |
-| Paths where openfw deliberately differs | `test_jobs.py` outcome cases (out of memory without ready pages) | same results and final memory |
+| GPU jobs and power, step by step | `test_jobs.py`: 68 cases over 41 scenarios, both firmwares, same kernel structures and hardware model | **identical register writes, polls, host-visible memory and results** in all 68 |
+| Every userspace command field and kernel flag | `test_jobs.py --sweep`: each field of `pvr_stream_defs.c` and each kernel-settable flag bit set to bit patterns | **638 of 638** identical |
+| Desktop-like traffic | `test_jobs.py --stress N`: seeded random mixes (below) | **160 of 160** workloads identical |
 | Wired TLB entries, TLB refill handler, stale-entry fix-up, TLB flush | `test_mmu.py` on Unicorn's TLB-equipped M14Kc model | all pass |
 
-The 32 step-by-step scenarios (`tools/fwemu/jobs.py`):
-`power` (all maintenance/power commands), `compute`, `compute-chained`,
-`transfer`, `render` (geometry + partial-render skip + fragment, also with
-PM status values, 4×MSAA and a small target), `geom-only`, `cleanup`,
-`frames` (alternating HWRT data, as Mesa does), `frames-pipelined` (next
-frame's geometry while the previous fragment job runs), `multivm` (two
-page catalogues, sequential and concurrent), `blocked` (a job waiting for
-another context), `cleanup-busy`, `teardown`, `mixed` (compute, transfer
-and a render in flight), `wrap` (200 jobs: client CCB wrap-around),
-`oom`, `oom-live`, `oom-frames` (parameter memory exhausted, free list
-grown through the firmware CCB), `priority`, `multikick` (geometry in
-three kicks), `suspend` (frames with runtime suspend/resume between).
+The step-by-step scenarios (`tools/fwemu/jobs.py`):
 
-`make test KERNEL=~/linux REFERENCE=path/to/imagination.fw` runs all of
-it (about a minute; `--sweep` adds three).
+* **Work:** `power` (all maintenance/power commands), `compute`,
+  `compute-chained`, `transfer`, `render` (geometry + partial-render skip +
+  fragment, also with PM status values, 4×MSAA, a small target and a
+  render target array), `geom-only`, `frames` (alternating HWRT data, as
+  Mesa does), `frames-pipelined` (next frame's geometry while the previous
+  fragment job runs), `multikick` (geometry in three kicks), `mixed`
+  (compute, transfer and a render in flight), `wrap` (200 jobs: client CCB
+  wrap-around), `priority`.
+* **Several clients:** `multivm` (two page catalogues, sequential and
+  concurrent), `blocked` (a job waiting for another context),
+  `cleanup`, `cleanup-busy`, `teardown`, `suspend` (frames with runtime
+  suspend/resume between).
+* **Parameter memory:** `oom`, `oom-live`, `oom-frames` (free list grown
+  through the firmware CCB), `oom-wait` (no ready pages: the TA waits for
+  the kernel), `partial-render-*` (nothing left to grow: twice in a row,
+  with frames, with the 3D busy, depth/stencil and scratch buffers, MSAA,
+  multi-kick geometry, a failed or too-large grow, slow 3D).
+* **Recovery:** `hang-compute`, `hang-ta`, `hang-3d`, `hang-transfer`,
+  `hang-two` (several data masters stuck; with and without progress),
+  `hang-compute-usc` (progress only in the shader slots), `overrun`
+  (past the context deadline), `oom-wait-hang`, `fault-*` (GPU page
+  faults with one or two data masters busy).
+* **Stress:** `stress<seed>`: a compositor-like render context drawing
+  frames on two HWRT data sets, applications' compute and transfer work in
+  one or two VMs, priorities, cross-queue fences, completions in any
+  order, parameter-memory exhaustion, timer ticks, suspend/resume when
+  idle and teardown. The stress runs found twelve scheduling and
+  parameter-manager differences that no hand-written scenario had hit,
+  all fixed.
+
+`make test KERNEL=~/linux REFERENCE=path/to/imagination.fw` runs the cases
+(about three minutes); `--sweep` and `--stress N` add the rest.
 
 ## Trying it on the board
 
@@ -72,8 +94,10 @@ sudo board/openfw-test.sh openfw/rogue_36.50.54.182_v1.fw
 firmware at the end. Stage 1 checks the probe and cycles runtime
 suspend/resume. Stage 2 runs `vulkaninfo`, short `vkmark` scenes (clears,
 geometry + fragment, texture uploads through transfer jobs, blending, a
-1080p scene that grows the parameter buffer) and, if installed, a
-`dEQP-VK` smoke and compute subset, letting the GPU suspend between them;
+1080p scene that grows the parameter buffer), two `vkmark` clients at once
+(as a compositor and an application would be), OpenGL through Zink and,
+if installed, a `dEQP-VK` smoke and compute subset, letting the GPU
+suspend between them;
 any job timeout or firmware reset fails the step and saves the firmware
 trace. Please send the log it writes: it answers what emulation cannot
 (real hardware timing, the TLB on the real core, units the model only
@@ -97,16 +121,21 @@ interrupts (non-nesting):
 **Scheduling** (`sched.c`). A KICK names a context and its new client-CCB
 write offset. Ready contexts are processed per data master, the 3D pipe
 first (fragment and transfer jobs), then geometry, then compute; within a
-data master by context priority, then in the order they became ready;
-after a completion the freed data master is refilled first. Processing a
-context moves `dep_offset` over every command whose fences are satisfied
-(`FENCE`/`FENCE_PR`: the 32-bit UFO value is at least the required one),
-applies `UPDATE`s that are not behind a job, signals `NULL` commands and
-partial-render commands that are not needed, and starts the next job when
-its data master is free. On completion the job's `UPDATE`s signal its
-timeline UFO, `read_offset` moves past them, HWRT cleanup counters advance
-and the host is interrupted; the kernel signals the job's fence from the
-UFO. The GPU reports IDLE when no job runs.
+data master by context priority, then in the order they became runnable
+(a context waiting on a fence goes to the back once the fence holds).
+Processing a context moves `dep_offset` over every command whose fences
+are satisfied (`FENCE`/`FENCE_PR`: the 32-bit UFO value is at least the
+required one); if its data master is free it then applies `UPDATE`s that
+are not behind a job, signals `NULL` commands and partial-render commands
+that are not needed, and starts the next job. On completion the job's
+`UPDATE`s signal its timeline UFO, `read_offset` moves past them, HWRT
+cleanup counters advance and the host is interrupted; the kernel signals
+the job's fence from the UFO. Then, in this order: the freed data master
+is refilled, the other half of the render context (geometry ↔ fragment)
+is processed, after a 3D-pipe job the geometry contexts waiting on a
+fence it signalled are processed, and anything else still ready is left
+to a background re-check. Idle is reported in two steps: a power-off query,
+confirmed by the next interrupt task if nothing started meanwhile.
 
 **Jobs** (`kicks.c`, `gpu.c`). Before the first job after boot the GPU
 units are initialised. Each job activates its memory context: page
@@ -125,7 +154,40 @@ destroyed and before power-off. When the TA runs out of parameter memory
 the growable free list's ready pages are handed to the PM at once, the TA
 resumes, and a `FREELIST_GROW` request goes to the kernel through the
 firmware CCB; the kernel's `FREELIST_GROW_UPDATE` replenishes the ready
-pages.
+pages. Without ready pages the TA is stopped and its state stored until
+the grow arrives. When the list is at its maximum (or the kernel's grow
+fails), the render's partial-render command runs on the 3D pipe ahead of
+anything else: it renders what has been binned so far, which frees its
+parameter memory, and the TA resumes from where it stopped. Free lists
+move between the two PM contexts with TA allocation or 3D deallocation
+paused while the other side is running.
+
+**Hardware recovery** (`hwr.c`). The upstream kernel leaves lockups to
+the firmware: its job timeout only re-arms and its watchdog only checks
+that kernel commands still execute. openfw does what Imagination's
+firmware does. Every 31250 GPU timer ticks each busy data master is
+checked for progress: a hash of its signature registers, then the
+registers one by one, then the shader (USC) slots it holds. Compute gets
+15 checks without progress, geometry and fragment 3; a job past its
+context's deadline (30 s) overruns. A locked-up data master is recorded
+in the HWR info buffer and reported to the kernel
+(`CONTEXT_RESET_NOTIFICATION`, guilty or innocent; the kernel logs it).
+Once every busy data master has timed out the GPU is reset and
+initialised again, the lost jobs are skipped (their fences signal, so
+nothing waits forever; the lost frame or dispatch simply has wrong
+contents) and the kernel rebuilds the free lists
+(`FREELISTS_RECONSTRUCTION`); fragment jobs for render targets whose
+geometry was lost are discarded. A GPU page fault is
+reported at once with the faulting address. Everything else keeps
+running.
+
+**GPU memory access** (`gpumem.c`). Some jobs need the firmware to write
+into a context's GPU memory: a geometry phase that was cut short leaves
+the render target's tail pointer and render target caches dirty, and the
+next first geometry kick must start from zeroed ones. The firmware walks
+the context's page tables in system memory and maps each page through a
+wired TLB entry in the heap area the kernel reserves for the firmware's
+own mappings.
 
 Files:
 
@@ -134,9 +196,11 @@ Files:
 | `start.S` | reset entry, TLB refill handler, exception and interrupt vectors |
 | `boot.c` | processor and MMU setup (runs before kseg2 is mapped) |
 | `main.c` | kernel CCB, firmware CCB, power requests, tracing, fault handling |
-| `sched.c` | client CCB processing, fences, ready lists, completion, cleanup |
-| `kicks.c` | compute, transfer, geometry and fragment programming; parameter manager; out of memory |
-| `gpu.c` | unit initialisation, page catalogue sets, cache maintenance, end-of-job fence |
+| `sched.c` | client CCB processing, fences, ready lists, completion, cleanup, partial-render scheduling |
+| `kicks.c` | compute, transfer, geometry and fragment programming; parameter manager; out of memory, partial renders |
+| `gpu.c` | unit initialisation, GPU reset, page catalogue sets, cache maintenance, end-of-job fence |
+| `hwr.c` | lockup/overrun detection, page faults, recovery, free list reconstruction |
+| `gpumem.c` | GPU virtual memory access through the context's page tables |
 | `fw.h`, `mmu.h`, `mips.h`, `regs.h` | internal interfaces, address translation, CP0 helpers, register map |
 | `fwif.h` | firmware-interface offsets and trace IDs, generated by `gen_fwif.py` from the kernel headers via `tools/fwemu/layout.json` |
 | `device-36.50.54.182.json` | the core's features/BRNs/ERNs, packed into the container |
@@ -163,7 +227,7 @@ computes rather than copies.
 | `HEALTH_CHECK` | counted |
 | `POW` forced idle / cancel, dust count | `pow_state`, GPIO interrupt routing, `power_sync` |
 | `POW` off | PM state to memory, units shut down, SLC/PC flush, `pow_state` OFF, `power_sync`, core parks |
-| `FREELISTS_RECONSTRUCTION_UPDATE` | accepted (openfw never requests a reconstruction) |
+| `FREELISTS_RECONSTRUCTION_UPDATE` | ends a hardware recovery: geometry and fragment scheduling resumes |
 
 Return slots, `kccb_cmds_executed` and host interrupts follow the
 reference: return values only for commands the kernel waits on.
@@ -171,19 +235,23 @@ reference: return values only for commands the kernel waits on.
 ## Limitations
 
 * **Not run on hardware yet.** The hardware model in `tools/fwemu`
-  completes work instantly and returns fixed values for status registers;
-  timing, real PM behaviour and the real MIPS core are untested.
-* **Out of parameter memory with nothing left to grow.** When the free
-  list is at its maximum (256 MiB with Mesa) and no ready pages remain,
-  Imagination's firmware runs a partial render to free memory. openfw
-  leaves the TA stalled; the kernel's job timeout resets the GPU. Without
-  ready pages but still growable, openfw waits for the kernel's grow
-  instead of storing the TA for a possible partial render (same outcome).
+  completes work instantly or when a scenario says so, and returns fixed
+  or scripted values for status registers. Real timing, real PM
+  behaviour, the real MIPS core and real lockups are untested. The first
+  board run (`board/openfw-test.sh`) is the step that matters now.
 * **Layered framebuffers** (render target arrays with more than one
-  layer): not implemented. The firmware would have to read the render
-  target cache through a GPU virtual address mapping.
-* **Hardware recovery.** No lockup detection or context reset inside the
-  firmware; the kernel's job timeout and full GPU reset are the recovery
-  path. MMU page faults are cleared but not reported.
+  layer in one render): Mesa does not use them on this GPU. Its BXE-4-32
+  device description leaves `gs_rta_support` off, so multi-layer
+  framebuffers are drawn one layer per render, which openfw handles like
+  any other render. The firmware side of layered rendering (the render
+  target array state across partial renders) follows the reference only
+  as far as the emulator could show it with one layer active.
 * **Context switching / preemption** is not implemented; the upstream
   driver does not request it.
+* **Recovery timing** is the reference's, in GPU timer ticks (the GPU
+  clock / 256): one check every 31250 ticks, about 20 ms at 400 MHz. A
+  compute job is reset after about 16 checks (0.3 s) in which none of its
+  signature registers or shader slots changed, geometry and fragment jobs
+  after 4 (80 ms). Work that is running changes them all the time; a
+  shader stuck in a loop does not. The kernel does not tell userspace
+  about a reset (no `VK_ERROR_DEVICE_LOST`), it only logs it.

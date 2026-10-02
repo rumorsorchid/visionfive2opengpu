@@ -22,7 +22,14 @@
 
 #define MAX_READY 32
 
+/*
+ * Contexts with unprocessed commands, in the order they became runnable:
+ * a context stopped at an unsatisfied fence with nothing before it is
+ * "blocked" and goes to the back when the fence is satisfied, as in the
+ * reference firmware.
+ */
 static u32 ready[MAX_READY];
+static u8 blocked[MAX_READY];
 static u32 nready;
 static struct job running[DM_COUNT];
 
@@ -44,19 +51,39 @@ static int ctx_is_ready(u32 ctx)
 
 static void ready_add(u32 ctx)
 {
-	if (!ctx_is_ready(ctx) && nready < MAX_READY)
+	if (!ctx_is_ready(ctx) && nready < MAX_READY) {
+		blocked[nready] = 0;
 		ready[nready++] = ctx;
+	}
 }
 
 static void ready_del(u32 ctx)
 {
 	for (u32 i = 0; i < nready; i++) {
 		if (ready[i] == ctx) {
-			for (; i + 1 < nready; i++)
+			for (; i + 1 < nready; i++) {
 				ready[i] = ready[i + 1];
+				blocked[i] = blocked[i + 1];
+			}
 			nready--;
 			return;
 		}
+	}
+}
+
+/* Track whether @ctx waits on a fence; a context unblocked goes last. */
+static void ready_set_blocked(u32 ctx, int b)
+{
+	for (u32 i = 0; i < nready; i++) {
+		if (ready[i] != ctx)
+			continue;
+		if (b) {
+			blocked[i] = 1;
+		} else if (blocked[i]) {
+			ready_del(ctx);
+			ready_add(ctx);
+		}
+		return;
 	}
 }
 
@@ -310,6 +337,7 @@ static int process(u32 ctx)
 
 	cccb_open(ctx, &c);
 	dep = dep_walk(ctx, &c);
+	ready_set_blocked(ctx, dep != c.woff && FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET) == dep);
 	dm = FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
 	if (dm < DM_COUNT && running[dm].ctx)
 		return 0;			/* its data master is busy: wait (also
@@ -395,7 +423,7 @@ static int ctx_woken(u32 ctx)
 
 /*
  * Process the ready contexts of one data master: highest priority first
- * (PVR_CTX_PRIORITY_*), then in the order they became ready.
+ * (PVR_CTX_PRIORITY_*), then in the order they became runnable.
  */
 static int run_dm(u32 dm)
 {

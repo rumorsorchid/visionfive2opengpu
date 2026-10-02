@@ -119,7 +119,7 @@ raises `POWER_COMPLETE`; `CLK_CTRL` starts at its all-auto reset value;
 | Tool | What it does |
 |---|---|
 | `host.py` | builds what `drm/imagination` builds: VM contexts, compute/render/transfer contexts with static state, client CCBs, free lists, HWRT data sets (kernel formulas), jobs with fences, `KICK`/`COMBINED_GEOM_FRAG_KICK`, cleanup; answers firmware-CCB free list grow requests like `pvr_free_list_process_grow_req` |
-| `jobs.py` | job scenarios on top of a GPU model: kicks complete in order and raise their events; optional PM status values (`status_tags`), out-of-memory events (`oom`), TA stall until resumed, runtime suspend/resume |
+| `jobs.py` | job scenarios on top of a GPU model: kicks complete in order (or when the scenario says, `complete_dm`) and raise their events; optional PM status values (`status_tags`), out-of-memory events (`oom`), TA stall until resumed, runtime suspend/resume, data masters that never finish (`hang`), signature registers that change or not (`tick(regs=...)`), MMU page faults, randomised workloads (`stress<seed>`) |
 | `spec.py` | functional register trace per step (MTS bookkeeping and firmware MMU maintenance filtered) |
 | `vary.py`, `sweep.py` | change one input or one command field at a time and report which register values depend on it |
 
@@ -132,12 +132,24 @@ python3 ../../openfw/test_jobs.py OPENFW.fw IMG.fw --kernel ~/linux [--sweep]
 Scenarios: `power`, `compute`, `compute2`, `transfer`, `render`, `geom`,
 `cleanup`, `cleanup-busy`, `teardown`, `frames`, `frames-pipelined`,
 `multivm`, `multivm-concurrent`, `blocked`, `wrap`, `mixed`, `priority`,
-`priority2`, `multikick`, `oom`, `oom-live`, `oom-frames`, `suspend`.
-Command fields are filled with tags (`0x5A0nn000`) so the report names
-the field behind every register value.
+`priority2`, `multikick`, `oom`, `oom-live`, `oom-frames`, `oom-wait`,
+`oom-wait-hang`, `pr-slow`, `suspend`, `hang-*`, `overrun`, `fault-*`,
+`stress<seed>`. Command fields are filled with tags (`0x5A0nn000`) so the
+report names the field behind every register value.
+
+GPU memory: contexts get real page tables (`GpuVM`, the `pvr_mmu.c`
+format) in a sparse system-memory model (`SysMem`), and the firmware's
+reserved heap window is translated through the MIPS wrapper's remap
+ranges, so firmware writes into GPU virtual memory (render target cache
+zeroing) land where they would on hardware and are compared. The timer
+counts at `FWEMU_CORE_CLOCK / 256` (default 409.6 MHz), as the GPU's.
+The host answers `FREELISTS_RECONSTRUCTION` like
+`pvr_free_list_process_reconstruct_req` (free lists rebuilt, HWRT data
+marked `RTDATA_STATE_HWR`).
 
 ## Next steps
 
-* A model of render-target-array (layered) rendering and of partial
-  renders, the two firmware paths openfw does not implement yet.
-* Timing: the model completes work instantly; real hardware does not.
+* Timing: the model completes work instantly or when a scenario says so;
+  real hardware takes its own time, and lockup detection depends on it.
+* Layered rendering with several active layers, which Mesa does not use
+  on this core.

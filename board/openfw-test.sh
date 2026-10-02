@@ -12,7 +12,8 @@
 # Stage 2 (unless --no-jobs): real work through Mesa's Vulkan driver -
 # vulkaninfo, short vkmark scenes (clears, geometry + fragment, texture
 # uploads through transfer jobs, blending, a 1080p scene that grows the
-# parameter buffer) and, when installed, a dEQP-VK smoke/compute subset.
+# parameter buffer), two vkmark clients at once (as on a desktop), OpenGL
+# through Zink and, when installed, a dEQP-VK smoke/compute subset.
 # The GPU is allowed to suspend between workloads. Each step checks its
 # exit status and the kernel log for job timeouts and firmware resets.
 # Close anything using the GPU (compositor, vkcube, ...) before running.
@@ -149,8 +150,26 @@ if [ "$JOBS" = 1 ]; then
 		done
 		run "vkmark cube 1920x1080 (parameter buffer growth)" 180 \
 			vkmark --winsys headless -s 1920x1080 -b cube:duration=10 -b desktop:duration=10
+		# A desktop has several GPU clients at once (compositor, browser,
+		# video): two processes, two VMs, geometry/fragment/transfer work
+		# interleaved by the firmware's scheduler.
+		# shellcheck disable=SC2016  # expanded by the inner sh
+		run "two vkmark clients at once" 180 sh -c '
+			vkmark --winsys headless -s 1280x720 -b desktop:duration=15 -b effect2d:duration=10 &
+			a=$!
+			vkmark --winsys headless -s 640x480 -b cube:duration=10 -b texture:duration=15
+			b=$?
+			wait $a && [ $b = 0 ]'
 	else
 		log "SKIP  vkmark not installed"
+	fi
+	# OpenGL/GLES go through Zink on this GPU (no native GL driver)
+	if command -v eglinfo >/dev/null; then
+		run "Zink on PowerVR (eglinfo)" 60 sh -c '
+			MESA_LOADER_DRIVER_OVERRIDE=zink eglinfo -B 2>&1 | tee /dev/stderr |
+				grep -qi "zink.*powervr"'
+	else
+		log "SKIP  eglinfo not installed (apt install mesa-utils)"
 	fi
 	if command -v deqp-vk >/dev/null; then
 		for cases in 'dEQP-VK.api.smoke.*' 'dEQP-VK.compute.pipeline.basic.*'; do

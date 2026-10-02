@@ -113,8 +113,8 @@ Imagination's firmware can be traced to the field it came from;
 `vary.py` changes one input at a time and `sweep.py` sets fields to
 patterns, which separates values the firmware computes from values it
 copies. openfw implements the result and `openfw/test_jobs.py` compares
-the two firmwares step by step (32 scenarios, 406 field values, all
-identical).
+the two firmwares step by step (68 cases, 638 field values and 160
+randomised desktop-like workloads, all identical).
 
 **Client CCB.** `KICK` carries the new write offset; the firmware moves
 `dep_offset` over every command whose fences hold (`FENCE` and
@@ -127,9 +127,18 @@ out of memory; otherwise only its `UPDATE` is applied.
 
 **Scheduling.** One job per data master. Order: the 3D pipe (fragment and
 transfer jobs), geometry, compute; within a data master the higher
-context priority first, then the order contexts became ready; after a
-completion the freed data master is refilled before the others. Idle is
-"no job running" and is reported with a host interrupt.
+context priority first, then the order contexts became runnable (one
+waiting on a fence goes to the back once the fence holds). A context
+whose data master is busy only has its fences checked. After a
+completion: the freed data master is refilled, then the other half of the
+render context (geometry ↔ fragment); after a 3D-pipe job, geometry
+contexts waiting on a fence it signalled; everything else waits for a
+background task the firmware queues itself (`MTS_SCHEDULE = 0`).
+`0x6300 = 1` when the 3D pipe goes idle. Idle is "no job running",
+reported in two steps: a power-off query queues an interrupt task, which
+confirms IDLE with a host interrupt unless a job started meanwhile.
+Page catalogue register sets survive GPU power cycles; a context gets its
+old set back.
 
 **Per job.** Units init before the first job after boot (soft-reset
 release, SLC bypass, PDS/USC execution bases, pipeline defaults); cancel
@@ -160,10 +169,40 @@ when the 3D loads them.
 **Out of memory.** `PM_OUT_OF_MEMORY` during a TA: pause TA allocation
 (`0x2A0`/`0x2A8`), add the ready pages below the free list base in every
 PM context holding the list (stack top + ready pages, counts unchanged),
-resume allocation and the TA (`0x328`), drain, then firmware CCB
-`FREELIST_GROW` and `UPDATE_STATS`. `FREELIST_GROW_UPDATE` turns the new
-pages into ready pages; for a TA still waiting, it loads them keeping the
-kernel's ready pages in reserve.
+resume allocation and the TA (`0x328`), drain (a full 3D fence instead of
+an SLC flush when the 3D is busy), then firmware CCB `FREELIST_GROW` and
+`UPDATE_STATS`. Without ready pages the TA is stopped (`0x320`, context
+store `0xCF0`, drain, render target cache flush, 512 bytes of the RTC
+zeroed through GPU memory) until `FREELIST_GROW_UPDATE`, which loads the
+new pages keeping the kernel's ready pages in reserve; if the answer only
+brings reserve pages they are used like ready pages and another grow is
+requested. When the list cannot grow, or the grow fails, the render's
+`FRAG_PR` command runs on the 3D ahead of everything else (`0x338 = 1`),
+the 3D's PM state goes back to the HWRT data, and the TA is reloaded
+(`0x1B8`) and resumed.
+
+**Hardware recovery** (from running the reference with work that never
+completes, see `openfw/hwr.c`). The timer task checks each busy data
+master every 31250 GPU timer ticks (core clock / 256): a CRC of its
+signature registers (geometry `0x5000`–`0x5060`, `0x40E0`; fragment
+`0x5038`–`0x5068`, `0x40D8`; compute `0x40F8`; all `0x4600`, some behind
+bank-select registers), then register by register, then its USC slots
+(owner nibbles `0x4178`–`0x4190`, slot state `0x41D8 + 8·slot`). Compute
+gets 15 checks without progress (16 after a kick), geometry and fragment
+3 (4); one more if another data master is busy and on time. A job past
+`max_deadline_ms` overruns. Then: an HWR info record and
+`CONTEXT_RESET_NOTIFICATION` per busy data master (guilty if alone,
+innocent if not); when all busy ones have timed out, the reset:
+`XPU_BROADCAST`, `0x1340 |= 1` and drain, SLC/BIF flush, sidekick and SLC
+idle, soft reset of all units, units init again, `0x1608 = 0x78001`, full
+SLC flush. Each lost job is skipped (its updates applied, so its fences
+signal) and its events cleared; then `FREELISTS_RECONSTRUCTION`.
+Geometry and fragment work waits for the kernel's
+`FREELISTS_RECONSTRUCTION_UPDATE`, which marks the render targets
+`RTDATA_STATE_HWR`; fragment jobs on those are discarded. An MMU page
+fault (`EVENT_MMU_PAGE_FAULT`) is reported at once with the faulting
+address from `BIF_FAULT_BANK0_REQ_STATUS`. The upstream kernel only logs
+the notification; it never resets the GPU itself for a job timeout.
 
 **Power-off after work.** Free lists from both PM contexts and the 3D
 context's render state go to memory, then "GPU units deinit".
@@ -192,8 +231,8 @@ reference's register traffic for everything the upstream driver and Mesa
 submit, including concurrent work, out-of-memory and suspend/resume
 (job execution above). What emulation cannot show is how the real
 hardware responds (timing, status values, faults); that needs the board.
-The remaining gaps (partial renders on exhausted parameter memory,
-layered framebuffers, in-firmware recovery) are listed in
+Partial renders on exhausted parameter memory and in-firmware recovery
+are implemented too; what is left is listed in
 [openfw/README.md](../openfw/README.md#limitations).
 
 ### A sensible path
@@ -218,10 +257,11 @@ layered framebuffers, in-firmware recovery) are listed in
 5. **M3 – geometry + fragment** — *done in emulation*: parameter manager,
    free lists, partial-render commands, multi-kick geometry, out-of-memory
    with free list growth, concurrent geometry and fragment work.
-6. **M4 – power and recovery** — *partly*: idle reporting and runtime
-   suspend with PM state preserved are done; hardware recovery is left to
-   the kernel's GPU reset, partial renders on exhausted parameter memory
-   and layered framebuffers are missing.
+6. **M4 – power and recovery** — *done in emulation*: idle reporting,
+   runtime suspend with PM state preserved, partial renders on exhausted
+   parameter memory, lockup/overrun/page-fault recovery with free list
+   reconstruction. Layered framebuffers are not needed: Mesa renders
+   layers one at a time on this core.
 
 Each milestone can be validated on the board with the same kernel and
 Mesa, comparing behaviour and register traces against Imagination's

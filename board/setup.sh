@@ -35,6 +35,15 @@ export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1
 export MESA_VK_DEVICE_SELECT=1010:36054182
 EOF
 echo "wrote /etc/profile.d/powervr-jh7110.sh (log in again to apply)"
+# The same for graphical sessions started by systemd/a display manager,
+# which do not read /etc/profile.d.
+mkdir -p /etc/environment.d
+cat >/etc/environment.d/90-powervr-jh7110.conf <<'EOF'
+PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1
+MESA_VK_DEVICE_SELECT=1010:36054182
+EOF
+echo "wrote /etc/environment.d/90-powervr-jh7110.conf"
+echo "desktop: see docs/boot.md (WLR_RENDERER=vulkan, MESA_LOADER_DRIVER_OVERRIDE=zink)"
 
 if ! grep -qw 'cma=[0-9]*[MG]' /proc/cmdline; then
 	echo "note: consider adding cma=256M to the kernel command line"

@@ -8,7 +8,7 @@ rev 1.3B 8 GB) using only open drivers:
  OpenGL / GLES (Mesa Zink on Vulkan) ───┤ userspace
  Wayland / X (labwc, Weston, XWayland) ─┘
  drm/imagination (powervr.ko)  + verisilicon-dc + JH7110 Inno HDMI   kernel
- rogue_36.50.54.182_v1.fw  (Imagination, redistributable binary)     GPU firmware
+ rogue_36.50.54.182_v1.fw  (openfw, MIT; or Imagination's binary)   GPU firmware
 ```
 
 This repository assembles the pieces that exist (upstream Linux, the
@@ -27,7 +27,8 @@ rest on a real board.
 | Rascal/dust power-up | firmware-derived host sequence; vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
 | Mesa | 26.1+ supports BXE-4-32, non-conformant (`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`) | [board/cts.md](board/cts.md) |
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
-| Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth, suspend/resume); matches Imagination's firmware register for register in 32 emulated scenarios and 406 field sweeps; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
+| Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth and partial renders, hardware recovery, suspend/resume); matches Imagination's firmware register for register in 68 emulated cases, 638 field sweeps and 160 random desktop-like workloads; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
+| Boot / handoff | U-Boot HDMI framebuffer handed to Linux via EFI GOP and reserved memory; Debian sid checklist | [docs/boot.md](docs/boot.md) |
 | OpenBSD | roadmap + first patch (uncached DRAM alias) | [docs/openbsd.md](docs/openbsd.md) |
 
 Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
@@ -49,7 +50,7 @@ On the board (Debian/Ubuntu riscv64):
 
 ```sh
 sudo board/install-kernel.sh linux-image-*.deb   # kernel + DTB wiring (extlinux or EFI)
-sudo board/setup.sh rogue_36.50.54.182_v1.fw   # firmware, modprobe opts, Mesa env
+sudo board/setup.sh openfw/prebuilt/rogue_36.50.54.182_v1.fw   # firmware (open, or Imagination's), modprobe opts, Mesa env
 sudo reboot
 sudo board/vf2-gpu-check.sh --run              # verify + report file
 board/bench.sh headless                        # benchmarks
@@ -58,11 +59,16 @@ board/bench.sh headless                        # benchmarks
 ## Findings worth knowing
 
 * An open GPU firmware is feasible and written: `openfw/` (GCC-built
-  microMIPS, 15 KiB) runs the jobs the upstream driver and Mesa submit and,
+  microMIPS, 18 KiB) runs the jobs the upstream driver and Mesa submit and,
   in the emulator, makes the same register writes, polls and memory updates
   as Imagination's firmware in every tested scenario — compute, blits,
-  pipelined renders, multi-kick geometry, parameter-buffer growth, several
-  VMs and priorities, suspend/resume. It has not run on a board yet.
+  pipelined renders, multi-kick geometry, parameter-buffer growth and
+  partial renders, several VMs and priorities, lockup and page-fault
+  recovery, suspend/resume, and randomised mixes of all of it. It has not
+  run on a board yet.
+* The upstream kernel leaves GPU lockups entirely to the firmware: its job
+  timeout only re-arms and it never resets the GPU for one. Hardware
+  recovery therefore has to live in the firmware, and openfw has it.
 * The BXE-4-32 core is, by Imagination's own tables, identical to the
   TH1520's already-supported BXM-4-64 except for ISP pipe count. Every
   JH7110 problem has been SoC integration.
@@ -84,9 +90,10 @@ board/bench.sh headless                        # benchmarks
 2. `tools/pvrfw.py check-ddk` on the v1.1 firmware.
 3. Vulkan CTS run ([board/cts.md](board/cts.md)) → path to Mesa
    conformance whitelisting.
-4. `sudo board/openfw-test.sh openfw/rogue_36.50.54.182_v1.fw` → first
-   run of the open firmware on real hardware: probe, suspend/resume, then
-   vkmark scenes and a dEQP-VK subset (restores the original after).
+4. `sudo board/openfw-test.sh openfw/prebuilt/rogue_36.50.54.182_v1.fw` →
+   first run of the open firmware on real hardware: probe, suspend/resume,
+   then vkmark scenes, two clients at once, GL through Zink and a dEQP-VK
+   subset (restores the original after).
 
 ## Layout
 
@@ -97,7 +104,7 @@ board/     on-board scripts: kernel install, setup, health check, benchmarks, po
 tools/     pvrfw.py (firmware container/device-info/DDK cross-check), fwregs.py (register census),
            fwemu/ (boots the real firmware in an emulator, decodes its trace)
 openfw/    open firmware for the GPU's MIPS core (C + asm, GCC), with MMU, contract and job tests
-docs/      analysis, power investigation, firmware, tuning, OpenBSD
+docs/      analysis, power investigation, firmware, boot/handoff, tuning, OpenBSD
 firmware/  where to get the firmware and how to verify it
 openbsd/   OpenBSD patches
 ```

@@ -14,6 +14,14 @@ gpu_core  = gpu_root / N, N = 1..7
 pll2_out  = 1228.8 MHz  ->  /2 = 614.4 MHz, /3 = 409.6 MHz
 ```
 
+Which PLL2 rate a board has depends on the SPL, and the sources disagree:
+the `jh7110_hdmi` U-Boot driver expects 1188 MHz ("as the mainline SPL
+sets it"), which gives `gpu_core` = 396 MHz (/3) or 594 MHz (/2), the
+vendor rates. That driver prints the rate it finds at boot
+(`jh7110-hdmi: framebuffer ..., PLL2 ... Hz`), which settles it for a
+given board. The firmware's lockup detection counts GPU timer ticks
+(core clock / 256), so it scales with whichever rate is set.
+
 Check on the board:
 
 ```sh

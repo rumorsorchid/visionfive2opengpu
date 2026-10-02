@@ -1441,7 +1441,7 @@ SCENARIOS = {
     "hang-ta": lambda r: sc_hang_render(r, "TA"),
     "hang-two": sc_hang_two,
     "hang-transfer": sc_hang_transfer,
-    **{"stress%d" % i: (lambda i: lambda r: sc_stress(r, i))(i) for i in range(64)},
+    **{"stress%d" % i: (lambda i: lambda r: sc_stress(r, i))(i) for i in range(1024)},
     "hang-transfer-compute": lambda r: sc_hang_transfer(r, next_transfer=False),
     "hang-compute-usc": sc_hang_compute_usc,
     "hang-compute-twice": lambda r: sc_hang_compute_usc(r, ticks=30, progress=4, twice=True),

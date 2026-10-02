@@ -9,8 +9,9 @@ code most likely to fail on hardware untested: the boot-time wired
 mappings, the TLB refill handler and the TLB fix-up/flush routines. This
 harness runs exactly that code on Unicorn's M14Kc model (R4000-style TLB):
 
-  1. boot_setup() from the reset vector: wired TLB entries 0-4, Wired = 5,
-     the rest invalid; every MIPS_ADDR_REMAP_RANGE_CONFIG write checked;
+  1. boot_setup() from the reset vector: wired TLB entries 0-5 (5 is the
+     GPU memory window, gpumem.c), Wired = 6, the rest invalid; every
+     MIPS_ADDR_REMAP_RANGE_CONFIG write checked;
   2. the refill handler, entered with EntryHi set as the hardware would,
      for pages across the heap: TLB entry contents, the two remap ranges
      it programs, and a load through the new mapping;
@@ -42,6 +43,7 @@ HEAP = 0xC0000000
 PT = 0xCF000000
 STACK = 0xCF600000
 REGS = 0xCF800000
+GPUMEM_WINDOW = 0xC0ED0000   # mips.h: the wired GPU memory window (gpumem.c)
 SYS_BASE = 0x8_8000_0000      # fake 36-bit system address of heap page 0
 REG_BASE = 0x1_1800_0000      # fake system address of the GPU registers
 PT_SYS = 0x8_7000_0000
@@ -210,7 +212,7 @@ def main():
     pc = uc.reg_read(MC.UC_MIPS_REG_PC)
     check(pc == after_call and not m.exceptions,
           "returns to _reset (pc=0x%08x, exceptions=%s)" % (pc, m.exceptions))
-    check(m.cp0(6) == 5, "Wired = 5")
+    check(m.cp0(6) == 6, "Wired = 6")
     check(m.cp0(15, 1) & 0xFFFFF000 == 0x9FC02000, "EBase = 0x9FC02000")
     rm = {e[0]: e for e in m.remaps() if e[1]}
     exp = {
@@ -236,13 +238,18 @@ def main():
         check(e is not None and e[3] == sys_pa, "remap%d (odd page) -> %09x" % (i, sys_pa))
     check(not ({16, 19} & set(rm)) and not any(5 <= i < 16 or i >= 21 for i in rm),
           "only remap ranges 0-4, 17, 18, 20 enabled")
-    for i in range(5, 16):
+    # GPU memory window: uncached even page, odd page invalid, remap set per access
+    hi, l0, l1, pmask = m.tlb(5)
+    check((hi, l0 & 0x3FFFFFFF, l1 & 0x3FFFFFFF, pmask) ==
+          (GPUMEM_WINDOW, identity_lo(GPUMEM_WINDOW, 0x17) & 0x3FFFFFFF, 1, pm4k),
+          "TLB5 (GPU memory window): hi=%08x lo0=%08x lo1=%08x mask=%08x" % (hi, l0, l1, pmask))
+    for i in range(6, 16):
         hi, l0, l1, _ = m.tlb(i)
         if l0 & 2 or l1 & 2:
             check(False, "TLB%d invalid" % i)
             break
     else:
-        check(True, "TLB5-15 invalid")
+        check(True, "TLB6-15 invalid")
     check(m.load_word(REGS + 0x20) == 0 and m.reg_writes == [], "register window reachable")
     check(m.load_word(PT + 4 * 0x32) == ((SYS_BASE + 0x32 * PAGE) >> 6) & 0x3FFFFFC0 | 0x17,
           "page table readable through the wired mapping")
@@ -330,12 +337,13 @@ def main():
 	li	$t9, 0x%x
 	jalr	$t9
 	nop""" % (S["fw_tlb_flush"] | 1))
-    bad = [i for i in range(5, 16) if m.tlb(i)[1] & 2 or m.tlb(i)[2] & 2]
-    check(not bad, "TLB5-15 invalid after flush")
-    check(all(m.tlb(i)[0] == v[0] for i, v in exp.items()), "wired entries untouched")
+    bad = [i for i in range(6, 16) if m.tlb(i)[1] & 2 or m.tlb(i)[2] & 2]
+    check(not bad, "TLB6-15 invalid after flush")
+    check(all(m.tlb(i)[0] == v[0] for i, v in exp.items()) and m.tlb(5)[0] == GPUMEM_WINDOW,
+          "wired entries untouched")
     rm = m.remaps()
-    check(sorted(e[0] for e in rm) == sorted(list(range(5, 16)) + list(range(21, 32))) and
-          not any(e[1] for e in rm), "remap ranges 5-15 and 21-31 disabled")
+    check(sorted(e[0] for e in rm) == sorted(list(range(6, 16)) + list(range(22, 32))) and
+          not any(e[1] for e in rm), "remap ranges 6-15 and 22-31 disabled")
     check(not m.exceptions, "no unexpected exceptions (%s)" % m.exceptions)
 
     print("\n%s" % ("all checks passed" if not fails else "%d check(s) FAILED" % fails))
