@@ -27,7 +27,7 @@ rest on a real board.
 | Rascal/dust power-up | firmware-derived host sequence; vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
 | Mesa | 26.1+ supports BXE-4-32, non-conformant (`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`) | [board/cts.md](board/cts.md) |
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
-| Open firmware | **openfw M0/M1**: MIT firmware the driver accepts (boot, kernel CCB, MMU flush, suspend/resume); no job execution yet; emulator-verified, needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
+| Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth, suspend/resume); matches Imagination's firmware register for register in 32 emulated scenarios and 406 field sweeps; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
 | OpenBSD | roadmap + first patch (uncached DRAM alias) | [docs/openbsd.md](docs/openbsd.md) |
 
 Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
@@ -57,9 +57,12 @@ board/bench.sh headless                        # benchmarks
 
 ## Findings worth knowing
 
-* An open GPU firmware is feasible: `openfw/` (GCC-built microMIPS) passes
-  the same 25-step kernel-contract test as Imagination's image in the
-  emulator. Job execution (compute first) is the next milestone.
+* An open GPU firmware is feasible and written: `openfw/` (GCC-built
+  microMIPS, 15 KiB) runs the jobs the upstream driver and Mesa submit and,
+  in the emulator, makes the same register writes, polls and memory updates
+  as Imagination's firmware in every tested scenario — compute, blits,
+  pipelined renders, multi-kick geometry, parameter-buffer growth, several
+  VMs and priorities, suspend/resume. It has not run on a board yet.
 * The BXE-4-32 core is, by Imagination's own tables, identical to the
   TH1520's already-supported BXM-4-64 except for ISP pipe count. Every
   JH7110 problem has been SoC integration.
@@ -82,7 +85,8 @@ board/bench.sh headless                        # benchmarks
 3. Vulkan CTS run ([board/cts.md](board/cts.md)) → path to Mesa
    conformance whitelisting.
 4. `sudo board/openfw-test.sh openfw/rogue_36.50.54.182_v1.fw` → first
-   run of the open firmware on real hardware (restores the original after).
+   run of the open firmware on real hardware: probe, suspend/resume, then
+   vkmark scenes and a dEQP-VK subset (restores the original after).
 
 ## Layout
 
@@ -92,7 +96,7 @@ board/     on-board scripts: kernel install, setup, health check, benchmarks, po
            register probe, open-firmware trial, CTS guide
 tools/     pvrfw.py (firmware container/device-info/DDK cross-check), fwregs.py (register census),
            fwemu/ (boots the real firmware in an emulator, decodes its trace)
-openfw/    open firmware for the GPU's MIPS core (C + asm, GCC), with MMU and contract tests
+openfw/    open firmware for the GPU's MIPS core (C + asm, GCC), with MMU, contract and job tests
 docs/      analysis, power investigation, firmware, tuning, OpenBSD
 firmware/  where to get the firmware and how to verify it
 openbsd/   OpenBSD patches

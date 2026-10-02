@@ -106,15 +106,38 @@ Any image in the container format runs, including `openfw/`;
 `openfw/test_contract.py` uses this emulator to compare images against
 the driver's expectations.
 
-Hardware completion model: Imagination's two poll routines
-(`0xc0008c7c`, per-core variant `0xc0008d8c` in v1.0 b6503725) are hooked and every polled
-condition is satisfied immediately; `EVENT_STATUS` bits stay set until
-the firmware writes `EVENT_CLEAR`; `POWER_EVENT` with `REQ_EN` raises
-`POWER_COMPLETE`; `CLK_CTRL` starts at its all-auto reset value.
+Hardware completion model: Imagination's poll routines (`0xc0008c7c`,
+`0xc0008d8c`, `0xc0008ee4`, `0xc0008f20` in v1.0 b6503725) and openfw's
+`poll_reg` (found through `openfw.map` next to the image) are hooked and
+every polled condition is satisfied immediately; `EVENT_STATUS` bits stay
+set until the firmware writes `EVENT_CLEAR`; `POWER_EVENT` with `REQ_EN`
+raises `POWER_COMPLETE`; `CLK_CTRL` starts at its all-auto reset value;
+`MULTICORE_GPU` reports one geometry-capable core.
+
+## Jobs: host model, scenarios and comparisons
+
+| Tool | What it does |
+|---|---|
+| `host.py` | builds what `drm/imagination` builds: VM contexts, compute/render/transfer contexts with static state, client CCBs, free lists, HWRT data sets (kernel formulas), jobs with fences, `KICK`/`COMBINED_GEOM_FRAG_KICK`, cleanup; answers firmware-CCB free list grow requests like `pvr_free_list_process_grow_req` |
+| `jobs.py` | job scenarios on top of a GPU model: kicks complete in order and raise their events; optional PM status values (`status_tags`), out-of-memory events (`oom`), TA stall until resumed, runtime suspend/resume |
+| `spec.py` | functional register trace per step (MTS bookkeeping and firmware MMU maintenance filtered) |
+| `vary.py`, `sweep.py` | change one input or one command field at a time and report which register values depend on it |
+
+```sh
+python3 jobs.py FW render --kernel ~/linux             # steps, writes, memory, firmware log
+python3 spec.py FW frames-pipelined --kernel ~/linux --set status_tags=1
+python3 ../../openfw/test_jobs.py OPENFW.fw IMG.fw --kernel ~/linux [--sweep]
+```
+
+Scenarios: `power`, `compute`, `compute2`, `transfer`, `render`, `geom`,
+`cleanup`, `cleanup-busy`, `teardown`, `frames`, `frames-pipelined`,
+`multivm`, `multivm-concurrent`, `blocked`, `wrap`, `mixed`, `priority`,
+`priority2`, `multikick`, `oom`, `oom-live`, `oom-frames`, `suspend`.
+Command fields are filled with tags (`0x5A0nn000`) so the report names
+the field behind every register value.
 
 ## Next steps
 
-* Geometry/fragment kicks (render targets, free lists, PM): the hard part
-  of an open firmware, and the path that needs a parameter-manager model.
-* A built-in register-trace diff (today: run both images with
-  `--trace-regs` and diff, as done for openfw's boot sequence).
+* A model of render-target-array (layered) rendering and of partial
+  renders, the two firmware paths openfw does not implement yet.
+* Timing: the model completes work instantly; real hardware does not.

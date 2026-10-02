@@ -91,15 +91,82 @@ The assert strings name ten source files: `rgxfw_init.c`,
 * **Host interrupt.** `MIPS_WRAPPER_IRQ_STATUS = 1`, raised after the
   return slot is written.
 * **Return slots.** Set (`CMD_EXECUTED`) for the commands the kernel waits
-  on (MMU cache, log type, cleanup); left at 0 for health checks and power
-  requests, which the kernel tracks through `kccb_cmds_executed` and
-  `power_sync`.
+  on (MMU cache, log type, cleanup); left at 0 for kicks, grow updates,
+  health checks and power requests, which the kernel tracks through
+  `kccb_cmds_executed` and `power_sync`.
 * **Power.** Health check → idle timer → `pow_state = IDLE`. Forced idle →
   `FORCED_IDLE`, `power_sync = 1`. Power off → "GPU units deinit / GPU
   deinit", SLC flush of MMU data (`SLC_CTRL_FLUSH_INVAL = 0x10`), page
   catalogue invalidate (`BIF_CTRL_INVAL = 0x4`), `pow_state = OFF`,
   `power_sync = 1`, then `di; wait`. On runtime resume the kernel reboots
   the same image; the kernel CCB continues where it stopped.
+
+## Job execution (from tracing the reference in fwemu)
+
+`tools/fwemu/host.py` builds what the kernel builds for a job —
+contexts with their static state, client CCBs, HWRT data sets, free lists,
+memory contexts — with the kernel's own formulas; `jobs.py` submits jobs
+the way `pvr_queue.c` does and models the GPU (work completes, events are
+raised, polls are satisfied, the PM can run out of memory). Every command
+field is filled with a tag (`0x5A0nn000`), so each register write of
+Imagination's firmware can be traced to the field it came from;
+`vary.py` changes one input at a time and `sweep.py` sets fields to
+patterns, which separates values the firmware computes from values it
+copies. openfw implements the result and `openfw/test_jobs.py` compares
+the two firmwares step by step (32 scenarios, 406 field values, all
+identical).
+
+**Client CCB.** `KICK` carries the new write offset; the firmware moves
+`dep_offset` over every command whose fences hold (`FENCE` and
+`FENCE_PR`: `(s32)(*ufo - value) >= 0`, a sync checkpoint when bit 0 of
+the address is set), across several queued jobs, and stops at the first
+fence that does not. When a job starts, `read_offset` points at it; when it
+completes, the `UPDATE`s after it are applied and `read_offset` moves past
+them. A partial-render command (`FRAG_PR`) is only run after the PM ran
+out of memory; otherwise only its `UPDATE` is applied.
+
+**Scheduling.** One job per data master. Order: the 3D pipe (fragment and
+transfer jobs), geometry, compute; within a data master the higher
+context priority first, then the order contexts became ready; after a
+completion the freed data master is refilled before the others. Idle is
+"no job running" and is reported with a host interrupt.
+
+**Per job.** Units init before the first job after boot (soft-reset
+release, SLC bypass, PDS/USC execution bases, pipeline defaults); cancel
+of a pending power-off; memory context activation (`MULTICORE_*_CTRL`,
+page catalogue set reuse by read-back, SLC/BIF invalidate for a new set,
+`BIF_CAT_BASE_INDEX` with one 3-bit field per data master); the data
+master's registers; the kick. Completion: clear the event, drain the data
+master (`0x4000`, `0x688`, `0x668`, `0x1608`, `MCU_FENCE`, `0x1720`, SLC
+flush of the data master's bits), signal fences.
+
+| Data master | Kick | Done event | Computed values (everything else is copied) |
+|---|---|---|---|
+| Compute | `0x478 = 1` | `COMPUTE_FINISHED` | context-store PDS program alternates between `cdm_context_pds0` and `_b` |
+| Transfer (3D pipe) | `0xF00 = 1` | `PIXELBE_END_RENDER` | tiles in flight `0xFD8 = min(1 + ISP_CTL[15:12], 4)`; FAST_2D region headers in the transfer heap; MSAA writes centre sample positions |
+| Geometry (TA) | `0x400 = 1` | `TA_FINISHED` | PM free list loads, VHEAP init or reload, region header init on first kicks, TE state from the HWRT common data, TPC flush at the end |
+| Fragment (3D) | `0xF00 = 1` | `PIXELBE_END_RENDER` (+ `PM_3D_MEM_FREE`, `ZLS_FINISHED` with forced Z store) | PM hand-over from the TA, tiles in flight, occlusion query base with `GET_VIS_RESULTS`, `0x6D0` with `DISABLE_PIXELMERGE` |
+
+**Parameter manager.** Two PM contexts (0 for the TA, 1 for the 3D), each
+with free list registers per local/global list (base, stack top — at bit
+32 for the TA's local list, bit 22 for the 3D's, a 32-bit register for
+global lists — page counts, load trigger) and status registers reporting
+the current state. `CONTEXT_PB_BASE` (`0x2B0`) has a bit per list that
+differs between the contexts. Lists are loaded only when a context does
+not hold them; the TA's PM state goes to the HWRT data when the 3D takes
+the render (or before the next TA reuses context 0) and to the free lists
+when the 3D loads them.
+
+**Out of memory.** `PM_OUT_OF_MEMORY` during a TA: pause TA allocation
+(`0x2A0`/`0x2A8`), add the ready pages below the free list base in every
+PM context holding the list (stack top + ready pages, counts unchanged),
+resume allocation and the TA (`0x328`), drain, then firmware CCB
+`FREELIST_GROW` and `UPDATE_STATS`. `FREELIST_GROW_UPDATE` turns the new
+pages into ready pages; for a TA still waiting, it loads them keeping the
+kernel's ready pages in reserve.
+
+**Power-off after work.** Free lists from both PM contexts and the 3D
+context's render state go to memory, then "GPU units deinit".
 
 ## A fully open firmware: honest assessment
 
@@ -113,13 +180,21 @@ transfer data masters, take their interrupts, handle parameter-buffer
 out-of-memory and partial renders, manage power and do hardware recovery.
 
 **What is not:** the exact hardware sequencing the firmware performs. The
-register *names* are known; the *order, timing and values* for the
-parameter manager, context switching, power islands and recovery are not
-documented anywhere public. The binary is ~29 000 microMIPS instructions.
+register *names* are mostly not public for the firmware-private units; the
+*order, timing and values* for the parameter manager, context switching,
+power islands and recovery are not documented anywhere. The binary is
+~29 000 microMIPS instructions.
 
-**Effort:** realistically many months of reverse engineering and testing
-for a single core, even with the interface given. A project to write one
-would be the first open PowerVR Rogue firmware.
+**Where this stands:** running Imagination's firmware in an emulator
+against the kernel's real structures turned that sequencing into
+something that can be observed and compared. openfw now reproduces the
+reference's register traffic for everything the upstream driver and Mesa
+submit, including concurrent work, out-of-memory and suspend/resume
+(job execution above). What emulation cannot show is how the real
+hardware responds (timing, status values, faults); that needs the board.
+The remaining gaps (partial renders on exhausted parameter memory,
+layered framebuffers, in-firmware recovery) are listed in
+[openfw/README.md](../openfw/README.md#limitations).
 
 ### A sensible path
 
@@ -128,9 +203,9 @@ would be the first open PowerVR Rogue firmware.
    firmware against a modelled register file and the kernel's own init
    structures. It reaches `firmware_started` with the same init trace as
    real hardware, consumes kernel-CCB commands (health check, power
-   requests) and runs a complete **compute job** (kick → "Kick Compute" →
-   completion → "Compute finished"). That is the executable specification
-   and test bench for M0–M2 of a replacement. Next: geometry/fragment.
+   requests) and runs complete compute, transfer, geometry and fragment
+   jobs. That is the executable specification and test bench for the
+   replacement.
 2. **M0 – boot handshake** — *done in emulation*: [`openfw/`](../openfw/README.md)
    boots, reports active and answers health checks.
 3. **M1 – kernel CCB** — *done in emulation*: MMU cache invalidation,
@@ -138,11 +213,15 @@ would be the first open PowerVR Rogue firmware.
    Imagination's image both pass the 25-step `test_contract.py`; the TLB
    code passes `test_mmu.py`. Waiting for the first board run
    (`board/openfw-test.sh`).
-4. **M2 – compute/transfer.** Single data master, UFO fence check/update,
-   completion interrupt. First real jobs (Vulkan compute, blits).
-5. **M3 – geometry + fragment.** Parameter manager, free lists, partial
-   renders. This is the hard core of the work.
-6. **M4 – power and recovery.** Idle power-down, rascal/dust island, HWR.
+4. **M2 – compute/transfer** — *done in emulation*: client CCB, fences,
+   memory contexts, compute and transfer data masters.
+5. **M3 – geometry + fragment** — *done in emulation*: parameter manager,
+   free lists, partial-render commands, multi-kick geometry, out-of-memory
+   with free list growth, concurrent geometry and fragment work.
+6. **M4 – power and recovery** — *partly*: idle reporting and runtime
+   suspend with PM state preserved are done; hardware recovery is left to
+   the kernel's GPU reset, partial renders on exhausted parameter memory
+   and layered framebuffers are missing.
 
 Each milestone can be validated on the board with the same kernel and
 Mesa, comparing behaviour and register traces against Imagination's

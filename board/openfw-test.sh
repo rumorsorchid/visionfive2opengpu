@@ -1,22 +1,28 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 #
-# openfw-test.sh - try the open M0 firmware (openfw/) on the board, then put
+# openfw-test.sh - try the open firmware (openfw/) on the board, then put
 # the previous firmware back.
 #
-#   sudo ./openfw-test.sh path/to/openfw/rogue_36.50.54.182_v1.fw
+#   sudo ./openfw-test.sh path/to/openfw/rogue_36.50.54.182_v1.fw [--no-jobs]
 #
-# What M0 is expected to do: the driver probes ("FW version v1.0 (build 0
-# OS)"), the firmware answers health checks, MMU flushes and power requests,
-# and the GPU runtime-suspends and resumes (each resume boots the firmware
-# again). Rendering is NOT expected to work: M0 does not execute jobs, so a
-# Vulkan/GL submission times out and the driver resets the GPU. Close
-# anything using the GPU (compositor, vkcube, ...) before running this.
+# Stage 1: the driver probes ("FW version v1.0 (build 0 OS)"), the
+# firmware answers health checks, MMU flushes and power requests, and the
+# GPU runtime-suspends and resumes (each resume boots the firmware again).
+# Stage 2 (unless --no-jobs): real work through Mesa's Vulkan driver -
+# vulkaninfo, short vkmark scenes (clears, geometry + fragment, texture
+# uploads through transfer jobs, blending, a 1080p scene that grows the
+# parameter buffer) and, when installed, a dEQP-VK smoke/compute subset.
+# The GPU is allowed to suspend between workloads. Each step checks its
+# exit status and the kernel log for job timeouts and firmware resets.
+# Close anything using the GPU (compositor, vkcube, ...) before running.
 #
 # Log: openfw-test-<date>.txt. Exit status: number of FAILed checks.
 
 set -u
 NEW=${1:-}
+JOBS=1
+[ "${2:-}" = --no-jobs ] && JOBS=0
 FWDIR=/lib/firmware/powervr
 FW=$FWDIR/rogue_36.50.54.182_v1.fw
 SAVED=$FWDIR/rogue_36.50.54.182_v1.fw.before-openfw
@@ -25,7 +31,7 @@ LOG=openfw-test-$(date +%Y%m%d-%H%M%S).txt
 FAILS=0
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
-[ -f "$NEW" ] || { echo "usage: $0 openfw/rogue_36.50.54.182_v1.fw"; exit 1; }
+[ -f "$NEW" ] || { echo "usage: $0 openfw/rogue_36.50.54.182_v1.fw [--no-jobs]"; exit 1; }
 
 exec 3>"$LOG"
 log()  { echo "$*"; echo "$*" >&3; }
@@ -103,6 +109,56 @@ for i in 1 2 3; do
 	st=$(cat "$GPU/power/runtime_status")
 	if [ "$st" = suspended ]; then pass "cycle $i: suspended"; else fail "cycle $i: runtime_status=$st (expected suspended)"; fi
 done
+
+# -- stage 2: jobs ---------------------------------------------------------------
+resets() { kmsg | grep -ciE 'job timeout|timed out|FW hard reset|device lost'; }
+
+# run NAME TIMEOUT COMMAND...: one workload, then let the GPU suspend
+run() {
+	name=$1; secs=$2; shift 2
+	before=$(resets)
+	log ""
+	log "-- $name: $*"
+	if timeout "$secs" "$@" >>"$LOG" 2>&1; then rc=0; else rc=$?; fi
+	after=$(resets)
+	if [ "$rc" = 0 ] && [ "$after" = "$before" ]; then
+		pass "$name"
+	else
+		fail "$name (exit $rc, $((after - before)) timeout/reset messages)"
+		log "   firmware trace (last 40 lines):"
+		echo on > "$GPU/power/control"; sleep 1
+		trace | tail -n 40 >&3
+		echo auto > "$GPU/power/control"
+	fi
+	sleep 3		# runtime suspend between workloads
+}
+
+if [ "$JOBS" = 1 ]; then
+	log ""
+	log "== jobs"
+	export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1 MESA_VK_DEVICE_SELECT=1010:36054182
+	if command -v vulkaninfo >/dev/null; then
+		run "vulkaninfo" 60 vulkaninfo --summary
+	else
+		log "SKIP  vulkaninfo not installed (apt install vulkan-tools)"
+	fi
+	if command -v vkmark >/dev/null; then
+		for scene in clear cube texture shading desktop effect2d; do
+			run "vkmark $scene 640x480" 120 vkmark --winsys headless -s 640x480 \
+				-b "$scene:duration=5"
+		done
+		run "vkmark cube 1920x1080 (parameter buffer growth)" 180 \
+			vkmark --winsys headless -s 1920x1080 -b cube:duration=10 -b desktop:duration=10
+	else
+		log "SKIP  vkmark not installed"
+	fi
+	if command -v deqp-vk >/dev/null; then
+		for cases in 'dEQP-VK.api.smoke.*' 'dEQP-VK.compute.pipeline.basic.*'; do
+			run "$cases" 900 deqp-vk --deqp-log-images=disable \
+				--deqp-log-filename=/tmp/openfw-deqp.qpa --deqp-case="$cases"
+		done
+	fi
+fi
 
 log ""
 log "== kernel messages"
