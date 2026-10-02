@@ -118,6 +118,14 @@ void BOOT boot_setup(void)
 		      (pte0 & ~0x3Fu) | ENTRYLO_C(CACHE_WRITEBACK) | ENTRYLO_D | ENTRYLO_V | ENTRYLO_G,
 		      (pte1 & ~0x3Fu) | ENTRYLO_C(CACHE_WRITEBACK) | ENTRYLO_D | ENTRYLO_V | ENTRYLO_G);
 
+	/* 5: GPU memory window (gpumem.c), uncached; its remap range is set
+	 * per access. The odd half stays invalid. */
+	tlb_write_index(GPUMEM_TLB, GPUMEM_WINDOW,
+			entrylo_identity(GPUMEM_WINDOW, ENTRYLO_C(CACHE_UNCACHED) | ENTRYLO_D |
+					 ENTRYLO_V | ENTRYLO_G), ENTRYLO_G);
+	remap_clear(GPUMEM_TLB);
+	remap_clear(GPUMEM_TLB + 16);
+
 	mtc0(C0_WIRED, 0, WIRED_ENTRIES);
 
 	/* Invalidate the rest: unique, never-used kseg3 tags, no remap. */

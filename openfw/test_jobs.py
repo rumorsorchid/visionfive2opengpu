@@ -36,6 +36,8 @@ CASES = [
     ("render-status", "render", {"status_tags": 1}),
     ("render-msaa4", "render", {"samples": 4}),
     ("render-small", "render", {"width": 64, "height": 64}),
+    ("render-rta1", "render", {"ta_regs": {0xD20: 1}}),
+    ("frames-rta1", "frames", {"ta_regs": {0xD20: 1}}),
     ("geom-only", "geom", {}),
     ("cleanup", "cleanup", {}),
     ("frames", "frames", {}),
@@ -97,6 +99,8 @@ CASES = [
     ("fault-two", "fault-two", {}),
     ("fault-two-b", "fault-two-b", {}),
     ("oom-wait", "oom-wait", {"oom": 1, "fl_threshold": 0}),
+    ("partial-render-rta", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256,
+                                   "oom_regs": {0xD20: 1}}),
     ("oom-wait-hang", "oom-wait-hang", {"oom": 1, "fl_threshold": 0}),
     ("partial-render-slow", "pr-slow", {"oom": 1, "fl_threshold": 0, "fl_max": 256}),
 ]

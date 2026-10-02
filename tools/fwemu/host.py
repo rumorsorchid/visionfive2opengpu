@@ -124,6 +124,64 @@ class Context:
         return self.fw + queue.ctx_offset
 
 
+class GpuVM:
+    """A GPU virtual address space in system memory, as pvr_mmu.c builds
+    it with 4 KiB device pages: a 1024-entry page catalogue (32-bit entries,
+    PD address >> 12 in bits 31:4), 512-entry page directories and tables
+    (64-bit entries, next-level / page address in bits 39:12), valid = 1."""
+
+    def __init__(self, sysmem, pc_pa):
+        self.mem, self.pc = sysmem, pc_pa
+        self.mem.write(pc_pa, bytes(PAGE))
+
+    def _pte_addr(self, va, create):
+        m = self.mem
+        pce = self.pc + 4 * ((va >> 30) & 0x3FF)
+        e = m.r32(pce)
+        if not e & 1:
+            if not create:
+                return None
+            pd = m.alloc()
+            m.write(pd, bytes(PAGE))
+            e = (pd >> 8) | 1
+            m.w32(pce, e)
+        pd = (e & ~0xF) << 8
+        pde = pd + 8 * ((va >> 21) & 0x1FF)
+        e = m.r64(pde)
+        if not e & 1:
+            if not create:
+                return None
+            pt = m.alloc()
+            m.write(pt, bytes(PAGE))
+            e = pt | 1                        # page size 4 KiB (0), valid
+            m.w64(pde, e)
+        return (e & 0xFFFFFFF000) + 8 * ((va >> 12) & 0x1FF)
+
+    def map(self, va, size, fill=0xA5, read_only=False):
+        for off in range(0, size, PAGE):
+            pte = self._pte_addr(va + off, True)
+            page = self.mem.alloc()
+            self.mem.write(page, bytes([fill]) * PAGE)
+            self.mem.w64(pte, page | (2 if read_only else 0) | 1)
+
+    def translate(self, va):
+        pte = self._pte_addr(va, False)
+        if pte is None:
+            return None
+        e = self.mem.r64(pte)
+        return (e & 0xFFFFFFF000) + (va & (PAGE - 1)) if e & 1 else None
+
+    def read(self, va, n):
+        out = bytearray()
+        while n:
+            k = min(n, PAGE - (va & (PAGE - 1)))
+            pa = self.translate(va)
+            out += self.mem.read(pa, k) if pa is not None else bytes(k)
+            va += k
+            n -= k
+        return bytes(out)
+
+
 class FreeList:
     def __init__(self, host, vm, gpu_addr, initial, max_pages, grow, threshold, fw_id):
         self.host = host
@@ -277,6 +335,7 @@ class Host:
         self.next_fl_id = 1
         self.free_lists = {}
         self.vms = []
+        self.gpu_vms = {}          # FW memory context -> GpuVM
 
     def fw_obj(self, name, size):
         """pvr_fw_object_create(..., PVR_BO_FW_FLAGS_DEVICE_UNCACHED)"""
@@ -293,6 +352,7 @@ class Host:
         self.set(M, va, "pc_dev_paddr", pc)
         self.set(M, va, "page_cat_base_reg_set", ROGUE_FW_BIF_INVALID_PCSET)
         self.vms.append(va)
+        self.gpu_vms[va] = GpuVM(self.emu.sysmem, pc)
         return va
 
     # -- pvr_context.c / pvr_queue.c -------------------------------------------------

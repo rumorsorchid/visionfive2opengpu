@@ -31,6 +31,7 @@ Scenarios:
   mixed        compute, transfer and a render in flight together
 """
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -45,6 +46,8 @@ import fwtrace  # noqa: E402
 import host as H  # noqa: E402
 from fwregs import load_cr_names  # noqa: E402
 from pvrfw import Firmware, Tables  # noqa: E402
+
+PAGE_SIZE = 0x1000
 
 # Start registers: (offset, value) written by the firmware to launch work
 # on a data master, and the EVENT_STATUS bits the hardware raises when that
@@ -93,6 +96,7 @@ class Runner:
         self.steps = []
         self.watch = {}
         self.watch_times = {}
+        self.watch_gpu_mem = {}
         self.kicks = []          # kicks in the current step (reports)
         self._kick_hist = []     # every kick, completed in order by the model
         self.oom_left = self.p["oom"]
@@ -149,6 +153,10 @@ class Runner:
             if isinstance(v, int) and (v & 0xFFFFFFFF) & 0xFF000000 == 0x5A000000 and v >> 32:
                 self.tags[v & 0xFFFFFFFF] = "%s.%s" % (sname.replace("rogue_fwif_", ""), path)
 
+    def watch_gpu(self, name, vm, va, size):
+        """GPU memory (through the VM's page tables) to compare."""
+        self.watch_gpu_mem[name] = (self.host.gpu_vms[vm], va, size)
+
     def watch_obj(self, name, va, size, times=()):
         """times: offsets of 64-bit timestamps inside the object; they
         depend on instruction counts, so only whether they are set is
@@ -164,6 +172,13 @@ class Runner:
                 if any(data[off:off + 8]):
                     data[off:off + 8] = (1).to_bytes(8, "little")
             snap[n] = bytes(data)
+        for n, (vm, va, sz) in getattr(self, "watch_gpu_mem", {}).items():
+            snap[n] = vm.read(va, sz)
+        # every write the firmware makes to system memory (GPU page
+        # tables, buffers) shows up here, watched or not
+        pages = self.emu.sysmem.pages
+        snap["sysmem"] = hashlib.sha256(b"".join(
+            k.to_bytes(8, "little") + bytes(pages[k]) for k in sorted(pages))).digest()[:8]
         return snap
 
     def mark(self, name):
@@ -242,6 +257,9 @@ class Runner:
         if self.p.get("status_tags"):
             for reg in STATUS_REGS.get(dm, ()):
                 self.emu.regs[reg] = 0x7E000000 | reg
+        if dm == "TA":
+            for reg, v in self.p["ta_regs"].items():
+                self.emu.regs[reg] = v
         self.emu.event_status |= bits
         self.emu.pending_tasks.append("irq")
         return True
@@ -282,6 +300,18 @@ class Runner:
         e.event_status |= 1 << 9
         e.pending_tasks.append("irq")
         return self.settle(label)
+
+    def complete_dm(self, dm, label):
+        """The GPU finishes the oldest running work of one data master
+        ("CDM", "TA", "3D") first, whatever was started before it."""
+        done = getattr(self, "_done_kicks", 0)
+        for i in range(done, len(self._kick_hist)):
+            if KICKS[self._kick_hist[i]][0] == dm:
+                self._kick_hist.insert(done, self._kick_hist.pop(i))
+                with self.out():
+                    self.kicks_pending()
+                break
+        return self.settle(label, complete=False)
 
     def tick(self, label, dt=0x10000, regs=None):
         """Let dt GPU timer ticks pass and deliver the firmware's timer
@@ -340,6 +370,7 @@ DEFAULT_PARAMS = {
     "grow_fail": 0,                  # the kernel cannot grow free lists
     "oom_regs": {},                  # {register: value} set with each OOM event
     "hang": (),                      # data masters ("CDM", "TA", "3D") that never finish
+    "ta_regs": {},                   # {register: value} set when a TA finishes
 }
 
 
@@ -473,6 +504,17 @@ def new_render(r, vm=None, data_sets=1):
     fl.grow_fails = gfl.grow_fails = bool(p["grow_fail"])     # host out of memory
     rts = [h.hwrt([fl, gfl], width=p["width"], height=p["height"], samples=p["samples"],
                   geom=p["geom"], rt=p["rt"]) for _ in range(data_sets)]
+    # tail pointer cache and render target cache in GPU memory, left dirty
+    # (the firmware zeroes them when a geometry phase was cut short)
+    g = p["geom"] or {}
+    tpc, tpc_size = g.get("tpc_dev_addr", 0xE100000000), g.get("tpc_size", 0x4000)
+    rtc = g.get("rtc_dev_addr", 0xE100200000)
+    gvm = h.gpu_vms[vm]
+    if gvm.translate(tpc) is None:
+        gvm.map(tpc, tpc_size, fill=0xA5)
+        gvm.map(rtc, PAGE_SIZE, fill=0x5A)
+    r.watch_gpu("tpc", vm, tpc, tpc_size)
+    r.watch_gpu("rtc", vm, rtc, 0x400)
     return ctx, fl, gfl, rts
 
 
@@ -1169,6 +1211,108 @@ def sc_oom_wait_hang(r, wait=3, ticks=12):
             "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
 
 
+def sc_stress(r, seed, ops=40):
+    """Randomised desktop-like traffic, the same for every firmware (seeded):
+    a compositor-like render context drawing frames on two HWRT data sets,
+    applications' compute and transfer work in one or two VMs, priorities,
+    cross-queue fences, completions in any order, memory pressure, timer
+    ticks with progress, suspend/resume when idle, and teardown."""
+    import random
+    rnd = random.Random(seed)
+    h, p = r.host, r.p
+    vms = [h.vm_context(p["pc"] + 0x100000 * i) for i in range(rnd.choice((1, 2)))]
+    comp = [h.compute_context(rnd.choice(vms), priority=rnd.choice((0, 0, 1, 2)))
+            for _ in range(rnd.choice((1, 2)))]
+    xfer = [h.transfer_context(rnd.choice(vms), priority=rnd.choice((0, 1)))
+            for _ in range(rnd.choice((0, 1, 1)))]
+    renders = []
+    for _ in range(rnd.choice((1, 1, 2))):
+        ctx, fl, gfl, rts = new_render(r, rnd.choice(vms), data_sets=2)
+        renders.append({"ctx": ctx, "rts": rts, "frame": 0, "fls": (fl, gfl)})
+    queues = [c.queues["compute"] for c in comp] + [c.queues["transfer"] for c in xfer]
+    for i, q in enumerate(queues):
+        watch_queue(r, q, "q%d" % i)
+    for i, rd in enumerate(renders):
+        watch_queue(r, rd["ctx"].queues["geometry"], "r%d.geom" % i)
+        watch_queue(r, rd["ctx"].queues["fragment"], "r%d.frag" % i)
+        for k, rt in enumerate(rd["rts"]):
+            r.watch_obj("r%d.hwrt%d" % (i, k), rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+        for k, fl in enumerate(rd["fls"]):
+            r.watch_obj("r%d.fl%d" % (i, k), fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 64)
+    r.watch_obj("fwccb_ctl", r.emu.fwccb_ctl, 16)
+    r.mark("setup")
+    jobs_, fences, n, ticks = [], [], 0, 0
+    fw_cmds = []
+
+    def deps():
+        return [rnd.choice(fences)] if fences and rnd.random() < 0.4 else []
+
+    def pump(label, complete):
+        r.settle(label, complete=complete)
+        for _ in range(4):
+            cmds = h.fwccb_process()
+            if not cmds:
+                break
+            fw_cmds.extend(cmds)
+            r.kccb_bg()
+            r.settle(label + " (host answers)", complete=complete)
+
+    for step in range(ops):
+        op = rnd.choice(("compute", "compute", "transfer", "frame", "frame", "frame",
+                         "complete", "complete", "settle", "tick", "oom", "power"))
+        label = "%d %s" % (step, op)
+        if op == "compute" or (op == "transfer" and not xfer):
+            c = rnd.choice(comp)
+            j = compute_job(r, c, deps(), base=0x10 * (n % 8))
+            h.submit(j)
+        elif op == "transfer":
+            c = rnd.choice(xfer)
+            q = c.queues["transfer"]
+            vals = fields(r, "rogue_fwif_cmd_transfer", 0x10 * (n % 8))
+            j = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals), deps())
+            h.submit(j)
+        elif op == "frame":
+            rd = rnd.choice(renders)
+            rt = rd["rts"][rd["frame"] % 2]
+            rd["frame"] += 1
+            geom, pr, frag = render_jobs(r, rd["ctx"], rt.data[0], 0x200 * (n % 4), deps())
+            h.submit_combined(geom, pr)
+            r.kccb_bg()
+            pump(label + " geometry", rnd.random() < 0.5)
+            h.submit(frag)
+            jobs_ += [geom, pr]
+            j = frag
+        elif op == "complete":
+            r.complete_dm(rnd.choice(("CDM", "TA", "3D")), label)
+            continue
+        elif op == "settle":
+            pump(label, True)
+            continue
+        elif op == "tick":
+            ticks += 1
+            r.tick(label, regs={0x4600: 0x1000 + ticks})     # everything progresses
+            continue
+        elif op == "oom":
+            r.oom_left += 1
+            continue
+        else:
+            pump(label + " (drain)", True)
+            if all(x.done() for x in jobs_):
+                r.power_cycle()
+            continue
+        n += 1
+        jobs_.append(j)
+        fences.append(j.fence())
+        r.kccb_bg()
+        pump(label, rnd.random() < 0.6)
+    pump("drain", True)
+    pump("drain again", True)
+    return {"done": [j.done() for j in jobs_],
+            "ufo": [q.ufo_value() for q in queues],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw_cmds]}
+
+
 def sc_hang_two(r, ticks=24, ta_progress=0):
     """Compute and geometry hung together (innocent / guilty work);
     ta_progress: ticks for which the geometry signature keeps changing."""
@@ -1296,6 +1440,7 @@ SCENARIOS = {
     "hang-ta": lambda r: sc_hang_render(r, "TA"),
     "hang-two": sc_hang_two,
     "hang-transfer": sc_hang_transfer,
+    **{"stress%d" % i: (lambda i: lambda r: sc_stress(r, i))(i) for i in range(64)},
     "hang-transfer-next": lambda r: sc_hang_transfer(r, next_transfer=True),
     "hang-compute-usc": sc_hang_compute_usc,
     "hang-compute-twice": lambda r: sc_hang_compute_usc(r, ticks=30, progress=4, twice=True),

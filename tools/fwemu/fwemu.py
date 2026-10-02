@@ -68,6 +68,58 @@ JAL_BUG_ALIAS_PA = 0x17C00000
 
 PAGE = 0x1000
 
+# The top of the heap below the config heap is reserved for the firmware's
+# own mappings (pvr_fw_mips.c: ROGUE_FW_HEAP_MIPS_RESERVED_SIZE): it maps
+# GPU memory there. Accesses are translated through the wrapper's remap
+# ranges or the page-table entries the firmware writes (see win_translate).
+RESERVED_OFF = 0xED0000
+RESERVED_SIZE = 0x100000
+
+
+class SysMem:
+    """System memory outside the firmware heap (GPU page tables, buffers),
+    as sparse 4 KiB pages."""
+
+    def __init__(self, base=0x200000000):
+        self.pages = {}
+        self.next = base          # page allocator: above 4 GiB, like DRAM on an 8 GB board
+
+    def alloc(self, n=1):
+        pa = self.next
+        self.next += n * PAGE
+        return pa
+
+    def read(self, pa, n):
+        out = bytearray()
+        while n:
+            off = pa & (PAGE - 1)
+            k = min(n, PAGE - off)
+            out += self.pages.get(pa >> 12, bytes(PAGE))[off:off + k]
+            pa += k
+            n -= k
+        return bytes(out)
+
+    def write(self, pa, data):
+        while data:
+            off = pa & (PAGE - 1)
+            k = min(len(data), PAGE - off)
+            page = self.pages.setdefault(pa >> 12, bytearray(PAGE))
+            page[off:off + k] = data[:k]
+            pa += k
+            data = data[k:]
+
+    def r32(self, pa):
+        return struct.unpack("<I", self.read(pa, 4))[0]
+
+    def r64(self, pa):
+        return struct.unpack("<Q", self.read(pa, 8))[0]
+
+    def w32(self, pa, v):
+        self.write(pa, struct.pack("<I", v & 0xFFFFFFFF))
+
+    def w64(self, pa, v):
+        self.write(pa, struct.pack("<Q", v))
+
 # Imagination's register poll routine, poll(reg_offset, value, mask, ...)
 # (it logs "HW poll ... failed" on timeout). The model completes every
 # polled hardware operation by presenting the awaited value.
@@ -209,7 +261,14 @@ class Emu:
         # One host buffer for the whole heap so that aliases share storage.
         self.heap = ctypes.create_string_buffer(FW_HEAP_SIZE)
         self.uc.mem_map_ptr(HEAP_PA, FW_HEAP_SIZE, UC_PROT_ALL, self.heap)
-        self.uc.mem_map_ptr(FW_HEAP_VA, FW_HEAP_SIZE, UC_PROT_ALL, self.heap)
+        self.uc.mem_map_ptr(FW_HEAP_VA, RESERVED_OFF, UC_PROT_ALL, self.heap)
+        top = RESERVED_OFF + RESERVED_SIZE
+        self.uc.mem_map_ptr(FW_HEAP_VA + top, FW_HEAP_SIZE - top, UC_PROT_ALL,
+                            ctypes.c_void_p(ctypes.addressof(self.heap) + top))
+        self.sysmem = SysMem()
+        self.win_log = []
+        self.uc.mmio_map(FW_HEAP_VA + RESERVED_OFF, RESERVED_SIZE,
+                         self.win_read, None, self.win_write, None)
         self.pt = ctypes.create_string_buffer(4 * PAGE)
         self.uc.mem_map_ptr(PT_PA, 4 * PAGE, UC_PROT_ALL, self.pt)
 
@@ -254,6 +313,7 @@ class Emu:
     def alloc(self, name, size, align=PAGE):
         va = (self.alloc_next + align - 1) & ~(align - 1)
         self.alloc_next = (va + size + PAGE - 1) & ~(PAGE - 1)
+        assert self.alloc_next <= FW_HEAP_VA + RESERVED_OFF, "FW heap full"
         self.objects[name] = (va, size)
         return va
 
@@ -428,6 +488,39 @@ class Emu:
         if off == 0x087C:  # MIPS_ADDR_REMAP_RANGE_CONFIG, written lo then hi
             self.remap_update(self.regs.get(0x0878, 0) | value << 32)
 
+    # -- the firmware's GPU memory window ---------------------------------------
+    def win_translate(self, va):
+        """System address behind a reserved-heap address: a remap range
+        covering it (TLB entry identity-mapped, as openfw's wired window),
+        else the page-table entry the firmware wrote (the reference's TLB
+        refill would load it and program the remap from it)."""
+        for base, size, out in self.remaps.values():
+            if base <= va < base + size:
+                return out + (va - base)
+        pte = struct.unpack_from("<I", self.pt, ((va - FW_HEAP_VA) >> 12) * 4)[0]
+        if pte & 2:
+            return ((pte & 0x3FFFFFC0) << 6) + (va & (PAGE - 1))
+        return None
+
+    def win_read(self, uc, off, size, user_data):
+        va = FW_HEAP_VA + RESERVED_OFF + off
+        pa = self.win_translate(va)
+        if pa is None:
+            print("!! window read 0x%08x: not mapped" % va)
+            return 0
+        v = int.from_bytes(self.sysmem.read(pa, size), "little")
+        self.win_log.append(("R", pa, size, v))
+        return v
+
+    def win_write(self, uc, off, size, value, user_data):
+        va = FW_HEAP_VA + RESERVED_OFF + off
+        pa = self.win_translate(va)
+        if pa is None:
+            print("!! window write 0x%08x = 0x%x: not mapped" % (va, value))
+            return
+        self.win_log.append(("W", pa, size, value))
+        self.sysmem.write(pa, (value & ((1 << (8 * size)) - 1)).to_bytes(size, "little"))
+
     # -- MIPS wrapper address remap unit -----------------------------------------
     def host_ptr(self, pa, size):
         for base, buf, length in ((HEAP_PA, self.heap, FW_HEAP_SIZE),
@@ -440,10 +533,16 @@ class Emu:
         entry = (val >> 1) & 0x1f
         self.remap_log.append(val)
         if not val & 1:
+            self.remaps.pop(entry, None)
             return
         base_in = val & 0xFFFFF000
         size = PAGE << (2 * ((val >> 7) & 0xf))
         out = (val >> 36) << 12
+        rsv = FW_HEAP_VA + RESERVED_OFF
+        if rsv <= base_in < rsv + RESERVED_SIZE:
+            self.remaps[entry] = (base_in, size, out)     # a GPU memory window
+            return
+        self.remaps.pop(entry, None)
         if self.args.trace_regs:
             print("  remap[%2d] 0x%08x+0x%x -> 0x%09x" % (entry, base_in, size, out))
         if base_in == REG_BANK_PA:

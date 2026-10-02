@@ -411,6 +411,8 @@ static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
  * context, drain it and flush the render target cache, so that the 3D can
  * render the tiles binned so far and free their parameter memory.
  */
+#define RTC_STORE_SIZE	512u	/* render target cache part cleared on a TA stop */
+
 static void pr_stop_ta(struct job *j)
 {
 	reg_write(0x0320, 1);			/* TA terminate */
@@ -423,6 +425,15 @@ static void pr_stop_ta(struct job *j)
 	reg_write(0x0CB8, 2);			/* render target cache flush */
 	poll_reg(0x0CB8, 2, 0);
 	FW32(j->hwrt + OFF_HWRTDATA_STATE) = RTDATA_GEOM_OUTOFMEM;
+	FW32(j->hwrt + OFF_HWRTDATA_RTA_CTL_ACTIVE_RENDER_TARGETS) = reg_read(0x0D20);
+	{
+		/* the render target cache starts over when the TA resumes */
+		u64 rtc = fw_read64(j->hwrt + OFF_HWRTDATA_RTC_DEV_ADDR);
+
+		if (rtc)
+			gpu_mem_zero(fw_read64(j->memctx + OFF_FWMEMCONTEXT_PC_DEV_PADDR), rtc,
+				     RTC_STORE_SIZE);
+	}
 	hwr_done(DM_GEOM);			/* stopped, not locked up */
 }
 
@@ -521,6 +532,8 @@ void freelist_grow_update(u32 d)
 
 /* -- geometry ------------------------------------------------------------------ */
 
+#define RTC_SIZE	768u	/* render target cache, as the reference zeroes it */
+
 void kick_geom(struct job *j)
 {
 	u32 p = j->payload, h = j->hwrt;
@@ -530,6 +543,18 @@ void kick_geom(struct job *j)
 	int first = flags & GEOM_FLAGS_FIRSTKICK;
 	u64 v;
 
+	if (first && FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING)) {
+		/* the previous geometry phase on this render target was cut
+		 * short (hardware recovery, an abandoned multi-kick render):
+		 * start from zeroed tail pointer and render target caches */
+		u64 pc = fw_read64(j->memctx + OFF_FWMEMCONTEXT_PC_DEV_PADDR);
+		u64 rtc = fw_read64(h + OFF_HWRTDATA_RTC_DEV_ADDR);
+
+		gpu_mem_zero(pc, fw_read64(h + OFF_HWRTDATA_TAIL_PTRS_DEV_ADDR),
+			     FW32(c + OFF_HWRTDATA_COMMON_TPC_SIZE));
+		if (rtc)
+			gpu_mem_zero(pc, rtc, RTC_SIZE);
+	}
 	/* PM context 0 is about to be reused: keep what it built for a
 	 * render whose 3D pass has not started yet */
 	if (pm_pending_hwrt && pm_pending_hwrt != h && !pm_pending_stored) {

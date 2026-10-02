@@ -19,6 +19,9 @@
 #define FW_BOOT_DATA		0xBFC01000	/* kseg1 view of the boot data page */
 #define FW_EBASE		0x9FC02000	/* kseg0 view of the exceptions page */
 #define REG_WINDOW		0xCF800000	/* GPU registers (MIPS_WRAPPER_CONFIG.REGBANK) */
+#define GPUMEM_WINDOW		0xC0ED0000	/* first page of the heap area the kernel
+						 * reserves for firmware mappings */
+#define GPUMEM_TLB		5		/* its wired TLB entry (remap entry 5) */
 #define REG_WINDOW_SIZE		0x00400000
 
 /* MIPS page-table entries as written by pvr_vm_mips.c */
@@ -40,7 +43,7 @@
 #define PAGEMASK_4M		0x007FF800
 
 #define TLB_ENTRIES		16
-#define WIRED_ENTRIES		5
+#define WIRED_ENTRIES		6
 
 /* CP0 Status */
 #define ST_IE			(1 << 0)

@@ -213,6 +213,9 @@ void sched_request_pr(struct job *geom);
 void freelist_grow_update(u32 data);
 void pm_hwr_reset(void);
 
+/* -- gpumem.c --------------------------------------------------------------- */
+void gpu_mem_zero(u64 pc, u64 va, u32 size);
+
 /* -- hwr.c ------------------------------------------------------------------ */
 void hwr_init(void);
 void hwr_kick(u32 dm, u32 ctx);
