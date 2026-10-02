@@ -170,6 +170,7 @@ u32 sched_cleanup(u32 type, u32 addr);
 int sched_idle(void);
 int sched_dm_busy(u32 dm);
 u32 sched_running_hwrt(u32 dm);
+struct job *sched_running_job(u32 dm);
 void sched_reset(void);
 
 struct job {

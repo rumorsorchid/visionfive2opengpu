@@ -144,7 +144,8 @@ class FreeList:
         self.current_pages += self.ready_pages
         self.ready_pages = 0
         grow = 0
-        if self.grow_pages and self.current_pages + self.grow_pages <= self.max_pages:
+        if (self.grow_pages and self.current_pages + self.grow_pages <= self.max_pages
+                and not getattr(self, "grow_fails", False)):
             self.current_pages += self.grow_pages
             grow = self.grow_pages
             self.ready_pages = self.ready_pages_for(self.current_pages)

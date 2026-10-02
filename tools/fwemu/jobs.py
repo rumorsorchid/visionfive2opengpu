@@ -282,6 +282,7 @@ DEFAULT_PARAMS = {
     "override": {},                  # {struct name: {field path: value}}
     "reg_init": {},                  # {register offset: power-on value}
     "oom": 0,                        # PM out-of-memory events raised during TAs
+    "grow_fail": 0,                  # the kernel cannot grow free lists
     "oom_regs": {},                  # {register: value} set with each OOM event
 }
 
@@ -413,6 +414,7 @@ def new_render(r, vm=None, data_sets=1):
                      grow=p["fl_grow"], threshold=p["fl_threshold"])
     gfl = h.free_list(vm, gpu_addr=p["gfl_addr"], initial=p["fl_initial"],
                       max_pages=p["fl_max"], grow=p["fl_grow"], threshold=p["fl_threshold"])
+    fl.grow_fails = gfl.grow_fails = bool(p["grow_fail"])     # host out of memory
     rts = [h.hwrt([fl, gfl], width=p["width"], height=p["height"], samples=p["samples"],
                   geom=p["geom"], rt=p["rt"]) for _ in range(data_sets)]
     return ctx, fl, gfl, rts

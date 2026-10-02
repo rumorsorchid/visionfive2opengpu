@@ -69,6 +69,11 @@ u32 sched_running_hwrt(u32 dm)
 	return running[dm].hwrt;
 }
 
+struct job *sched_running_job(u32 dm)
+{
+	return &running[dm];
+}
+
 /* No job on any data master (contexts blocked on fences do not count). */
 int sched_idle(void)
 {

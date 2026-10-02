@@ -59,6 +59,9 @@ CASES = [
     ("suspend-status", "suspend", {"status_tags": 1}),
     ("multikick-status", "multikick", {"status_tags": 1}),
     ("oom-live", "oom-live", {"oom": 1}),
+    ("oom-twice", "oom", {"oom": 2}),
+    ("oom-noready", "oom", {"oom": 1, "fl_threshold": 0}),
+    ("oom-noready-status", "oom", {"oom": 1, "fl_threshold": 0, "status_tags": 1}),
     ("partial-render", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256}),
     ("partial-render-status", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256,
                                       "status_tags": 1}),
@@ -72,6 +75,8 @@ CASES = [
         "rogue_fwif_cmd_frag": {"flags": (1 << 7) | (1 << 8)}}}),
     ("partial-render-scratch", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256, "override": {
         "rogue_fwif_cmd_frag": {"flags": 1 << 19, "regs.isp_ctl": 0}}}),
+    ("partial-render-grow-failed", "oom", {"oom": 1, "fl_threshold": 0, "grow_fail": 1}),
+    ("partial-render-grow-too-big", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 300}),
     ("partial-render-msaa", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256, "samples": 4}),
     ("partial-render-multikick", "multikick", {"oom": 2, "fl_threshold": 0, "fl_max": 256}),
     ("oom-frames", "oom-frames", {}),
@@ -82,10 +87,7 @@ CASES = [
 # (a TA out of memory with no ready pages waits for the grow instead of
 # being stored for a possible partial render): only the results and the
 # memory both leave behind at the end are compared.
-OUTCOME_CASES = [
-    ("oom-twice", "oom", {"oom": 2}),
-    ("oom-noready", "oom", {"oom": 1, "fl_threshold": 0}),
-]
+OUTCOME_CASES = []
 
 
 # --sweep: every userspace command field (pvr_stream_defs.c) and the
