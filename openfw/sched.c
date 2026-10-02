@@ -205,6 +205,8 @@ static u32 cmd_hwrt(u32 type, u32 payload)
 	return 0;
 }
 
+static void complete(u32 dm);
+
 static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type, u32 pr)
 {
 	u32 dm = job_dm(type);
@@ -228,6 +230,16 @@ static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type, u32 pr)
 		j->ctx = 0;
 		return 0;
 	}
+	if (j->hwrt && type != CCB_FRAG_PR &&
+	    FW32(j->hwrt + OFF_HWRTDATA_STATE) == RTDATA_HWR &&
+	    (type == CCB_FRAG || !(FW32(j->payload + OFF_CMD_GEOM_FLAGS) & GEOM_FLAGS_FIRSTKICK))) {
+		/* render target abandoned by a hardware recovery: the job is
+		 * discarded, its fences signalled */
+		TRACE(SF_OPENFW_HWR_DISCARD, dm, 1, j->hwrt, RTDATA_HWR, ctx, off);
+		complete(dm);
+		return 1;
+	}
+	hwr_kick(dm, ctx);
 
 	switch (type) {
 	case CCB_CDM:
@@ -291,6 +303,8 @@ static int process(u32 ctx)
 	dm = FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
 	if (dm < DM_COUNT && running[dm].ctx == ctx)
 		return 0;			/* a job of this context is running */
+	if (hwr_holds(dm))
+		return 0;			/* hardware recovery in progress */
 	off = FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET);
 
 	while (off != dep) {
@@ -354,6 +368,7 @@ static int run_dm(u32 dm)
 {
 	u32 list[MAX_READY], n = 0;
 	int progress = 0;
+
 
 	for (u32 i = 0; i < nready; i++) {
 		u32 c = ready[i], p = FW32(c + OFF_FWCOMMONCONTEXT_PRIORITY), k = n++;
@@ -506,7 +521,32 @@ static void complete(u32 dm)
 	}
 	memctx_deactivate(j->memctx, dm);
 	j->ctx = 0;
+	hwr_done(dm);
 	host_irq();
+}
+
+/*
+ * Hardware recovery: the job on @dm was lost in the GPU reset. It is
+ * skipped like a finished one: the commands after it signal its fences.
+ */
+void sched_skip(u32 dm)
+{
+	struct job *j = &running[dm];
+	struct cccb c;
+
+	if (!j->ctx)
+		return;
+	if (dm == DM_FRAG && spm.hwrt)
+		spm.hwrt = 0;
+	cccb_open(j->ctx, &c);
+	set_read(&c, run_updates(&c, j->end));
+	if (j->hwrt && j->type != CCB_FRAG_PR && !j->pr) {
+		u32 cl = j->hwrt + OFF_HWRTDATA_CLEANUP_STATE;
+
+		FW32(cl + OFF_CLEANUP_CTL_EXECUTED_COMMANDS) += 1;
+	}
+	memctx_deactivate(j->memctx, dm);
+	j->ctx = 0;
 }
 
 static const struct {

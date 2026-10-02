@@ -24,7 +24,7 @@ ASFLAGS = -march=mips32r2 -mmicromips -EL -msoft-float -mno-abicalls -fno-pic -G
 LDFLAGS = -nostdlib -static -T link.ld -Wl,--build-id=none -Wl,-z,max-page-size=4096 \
           -Wl,-Map,openfw.map
 
-OBJS = start.o boot.o main.o sched.o kicks.o gpu.o
+OBJS = start.o boot.o main.o sched.o kicks.o gpu.o hwr.o
 FW   = rogue_$(BVNC)_v1.fw
 
 all: $(FW)

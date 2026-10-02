@@ -20,6 +20,9 @@ NOISE = {
     0x0B08,            # MTS task done
     0x1A78,            # SCRATCH15 (firmware's own bookkeeping)
     0x0878, 0x087C,    # MIPS_ADDR_REMAP_RANGE_CONFIG (firmware MMU)
+    # bank selects for the lockup checks' signature register reads (the
+    # reads are not compared; how often a firmware re-reads is its own)
+    0x8000, 0x8238, 0x83E0,
 }
 
 

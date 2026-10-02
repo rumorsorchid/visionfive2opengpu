@@ -17,6 +17,7 @@
 #define CR_EVENT_ENABLE		0x0128u		/* DDK name RGX_CR_EVENT_ENABLE */
 #define CR_EVENT_STATUS		0x0130u
 #define CR_EVENT_CLEAR		0x0138u
+#define CR_SIDEKICK_IDLE	0x03C8u
 #define CR_TIMER		0x0160u		/* 64-bit, used for trace timestamps */
 #define CR_MIPS_ADDR_REMAP_RANGE_CONFIG	0x0878u	/* 64-bit, written lo then hi */
 #define CR_XPU_BROADCAST	0x0890u
@@ -40,9 +41,14 @@
 #define CR_BIF_PM_CAT_BASE_TE1	0x1270u
 #define CR_BIF_PM_CAT_BASE_ALIST1 0x1280u
 #define CR_BIF_CTRL_INVAL	0x12A0u
+#define CR_BIF_FAULT_BANK0_MMU_STATUS 0x12B0u
+#define CR_BIF_FAULT_BANK0_REQ_STATUS 0x12B8u	/* 64-bit */
 #define CR_BIF_FAULT_READ	0x13E0u		/* 64-bit */
+#define CR_BIFPM_READS_EXT_STATUS 0x1338u
+#define CR_BIFPM_STATUS_MMU	0x1350u
 #define CR_SLC_CTRL_FLUSH_INVAL	0x3818u
 #define CR_SLC_STATUS0		0x3820u
+#define CR_SLC_IDLE		0x3898u
 #define CR_MULTICORE_SYSTEM	0xF308u
 
 /* EVENT_STATUS / EVENT_CLEAR / MTS_DMn_INTERRUPT_ENABLE bits */
@@ -78,6 +84,7 @@
 #define BIF_CTRL_INVAL_PC	(1u << 2)
 #define BIF_CTRL_INVAL_TLB1	(1u << 3)
 
+#define SLC_FLUSH_INVAL_ALL	(1u << 0)
 #define SLC_FLUSH_INVAL_DM_MMU	(1u << 4)
 #define SLC_STATUS0_PENDING	0x7u
 

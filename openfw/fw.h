@@ -59,6 +59,8 @@ static inline __attribute__((always_inline)) u64 reg_read64(u32 off)
 /* enum rogue_fwif_fwccb_cmd_type */
 #define FWCCB_FREELIST_GROW	(103u | CMD_MAGIC)
 #define FWCCB_UPDATE_STATS	(107u | CMD_MAGIC)
+#define FWCCB_FREELISTS_RECONSTRUCTION (104u | CMD_MAGIC)
+#define FWCCB_CONTEXT_RESET_NOTIFICATION (105u | CMD_MAGIC)
 #define FWCCB_STATS_NUM_PARTIAL_RENDERS 1u
 #define FWCCB_STATS_NUM_OUT_OF_MEMORY 2u
 
@@ -105,6 +107,7 @@ static inline __attribute__((always_inline)) u64 reg_read64(u32 off)
 #define RTDATA_KICK_FRAG	4u
 #define RTDATA_FRAG_FINISHED	5u
 #define RTDATA_GEOM_OUTOFMEM	7u
+#define RTDATA_HWR		9u	/* set by the kernel's free list reconstruction */
 
 #define HWRTDATA_HAS_LAST_GEOM	(1u << 2)
 #define HWRTDATA_PARTIAL_RENDERED (1u << 3)
@@ -129,6 +132,7 @@ struct fw_globals {
 	u32 halt;
 	u32 fault_va, fault_count;
 	u32 kccb_irq;		/* this task already interrupted the host for the KCCB */
+	u32 hwrinfobuf;		/* HWR info buffer (rogue_fwif_hwrinfobuf) */
 };
 extern struct fw_globals g;
 
@@ -149,10 +153,13 @@ u32 pow_state(void);
 void fw_tlb_flush(void);
 void mts_schedule(u32 v);
 void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2);
+void fwccb_post(u32 type, const u32 *data, u32 n);
+u64 timer_read(void);
 
 /* -- gpu.c ------------------------------------------------------------------ */
 extern u32 gpu_units_on;
 void gpu_units_init(void);
+void gpu_hwr_reset(void);
 void gpu_cancel_power_off(void);
 void gpu_slc_mmu_flush(u32 bif_flags);
 void gpu_slc_flush(u32 bits);
@@ -172,6 +179,7 @@ int sched_dm_busy(u32 dm);
 u32 sched_running_hwrt(u32 dm);
 struct job *sched_running_job(u32 dm);
 void sched_reset(void);
+void sched_skip(u32 dm);
 
 struct job {
 	u32 ctx;		/* FW common context */
@@ -203,5 +211,15 @@ void oom_geom(struct job *j);
 void pr_finished(struct job *pr);
 void sched_request_pr(struct job *geom);
 void freelist_grow_update(u32 data);
+void pm_hwr_reset(void);
+
+/* -- hwr.c ------------------------------------------------------------------ */
+void hwr_init(void);
+void hwr_kick(u32 dm, u32 ctx);
+void hwr_done(u32 dm);
+void hwr_timer(void);
+void hwr_page_fault(void);
+int hwr_holds(u32 dm);
+void hwr_reconstruction_done(u32 data);
 
 #endif

@@ -33,9 +33,14 @@ KCCB_KICK = 101
 KCCB_MMUCACHE = 102
 KCCB_CLEANUP = 106
 KCCB_FREELIST_GROW_UPDATE = 110
+KCCB_FREELISTS_RECONSTRUCTION_UPDATE = 112
 KCCB_COMBINED_KICK = 117
 FWCCB_FREELIST_GROW = 103 | MAGIC
 FWCCB_UPDATE_STATS = 107 | MAGIC
+FWCCB_FREELISTS_RECONSTRUCTION = 104 | MAGIC
+FWCCB_CONTEXT_RESET_NOTIFICATION = 105 | MAGIC
+RTDATA_STATE_HWR = 9
+HWRTDATA_HAS_LAST_GEOM = 1 << 2
 
 CLEANUP_FWCOMMONCONTEXT, CLEANUP_HWRTDATA, CLEANUP_FREELIST = 0, 1, 2
 
@@ -136,6 +141,18 @@ class FreeList:
                         ("freelist_dev_addr", gpu_addr), ("current_dev_addr", cur_dev)):
             host.set(F, self.fw, path, v)
         self.current_pages, self.ready_pages = current, ready
+        self.hwrts = []          # HWRT data objects using this free list
+
+    def reconstruct(self):
+        """pvr_free_list_reconstruct: after a hardware recovery the pages
+        are put back on the list; HWRT data using it start over."""
+        h, F, D = self.host, "rogue_fwif_freelist", "rogue_fwif_hwrtdata"
+        h.set(F, self.fw, "current_stack_top", h.get(F, self.fw, "current_pages") - 1)
+        h.set(F, self.fw, "allocated_page_count", 0)
+        h.set(F, self.fw, "allocated_mmu_page_count", 0)
+        for d in self.hwrts:
+            h.set(D, d, "state", RTDATA_STATE_HWR)
+            h.set(D, d, "hwrt_data_flags", h.get(D, d, "hwrt_data_flags") & ~HWRTDATA_HAS_LAST_GEOM)
 
     def process_grow_req(self):
         """pvr_free_list_process_grow_req: the FW used the ready pages;
@@ -206,6 +223,7 @@ class HWRT:
             h.set(D, d, "hwrt_data_common_fw_addr", self.common)
             for j, fl in enumerate(free_lists):
                 h.set(D, d, "freelists_fw_addr[%d]" % j, fl.fw)
+                fl.hwrts.append(d)
             h.set(D, d, "tail_ptrs_dev_addr", geom.get("tpc_dev_addr", 0xE100000000))
             h.set(D, d, "vheap_table_dev_addr", geom.get("vheap_table_dev_addr", 0xE100100000))
             h.set(D, d, "rtc_dev_addr", geom.get("rtc_dev_addr", 0xE100200000))
@@ -400,6 +418,25 @@ class Host:
             elif t == FWCCB_UPDATE_STATS:
                 for f in ("element_to_update", "pid_owner", "adjustment_value"):
                     info[f] = self.get(C, cmd, "cmd_data.cmd_update_stats_data." + f)
+            elif t == FWCCB_FREELISTS_RECONSTRUCTION:
+                # pvr_free_list_process_reconstruct_req
+                p = "cmd_data.cmd_freelists_reconstruction."
+                n = min(self.get(C, cmd, p + "freelist_count"), 16)
+                ids = [self.get(C, cmd, p + "freelist_ids[%d]" % i) for i in range(n)]
+                info["freelist_ids"] = ids
+                for fid in ids:
+                    if fid in self.free_lists:
+                        self.free_lists[fid].reconstruct()
+                q = "cmd_data.free_lists_reconstruction_data."
+                info["kccb_slot"] = e.send_kccb(
+                    KCCB_FREELISTS_RECONSTRUCTION_UPDATE,
+                    [(q + "freelist_count", n)] +
+                    [(q + "freelist_ids[%d]" % i, fid) for i, fid in enumerate(ids)])
+            elif t == FWCCB_CONTEXT_RESET_NOTIFICATION:
+                p = "cmd_data.cmd_context_reset_notification."
+                for f in ("server_common_context_id", "reset_reason", "dm", "reset_job_ref",
+                          "flags", "fault_address"):
+                    info[f] = self.get(C, cmd, p + f)
             out.append((t, info))
 
     def hwrt(self, free_lists, width=1920, height=1080, **kw):

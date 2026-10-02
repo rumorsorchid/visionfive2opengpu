@@ -27,7 +27,12 @@ FIELDS = {
                            "initial_core_clock_speed"],
     "rogue_fwif_osinit": ["kernel_ccbctl_fw_addr", "kernel_ccb_fw_addr",
                           "kernel_ccb_rtn_slots_fw_addr", "firmware_ccbctl_fw_addr",
-                          "firmware_ccb_fw_addr", "fw_os_data_fw_addr"],
+                          "firmware_ccb_fw_addr", "fw_os_data_fw_addr",
+                          "rogue_fwif_hwr_info_buf_ctl_fw_addr"],
+    "rogue_fwif_runtime_cfg": ["core_clock_speed"],
+    "rogue_fwif_hwrinfobuf": ["hwr_info", "hwr_counter", "write_index",
+                              "hwr_dm_locked_up_count", "hwr_dm_overran_count",
+                              "hwr_dm_recovered_count"],
     "rogue_fwif_osdata": ["power_sync_fw_addr", "kccb_cmds_executed", "fw_os_config_flags"],
     "rogue_fwif_sysdata": ["config_flags", "pow_state"],
     "rogue_fwif_ccb_ctl": ["write_offset", "read_offset", "wrap_mask", "cmd_size"],
@@ -59,7 +64,9 @@ FULL = [
     "rogue_fwif_fwtransfercontext", "rogue_fwif_geom_ctx_state", "rogue_fwif_frag_ctx_state",
     "rogue_fwif_hwrtdata", "rogue_fwif_hwrtdata_common", "rogue_fwif_freelist",
     "rogue_fwif_fwccb_cmd", "rogue_fwif_fwccb_cmd_freelist_gs_data",
-    "rogue_fwif_fwccb_cmd_context_reset_data",
+    "rogue_fwif_fwccb_cmd_context_reset_data", "rogue_hwrinfo",
+    "rogue_fwif_fwccb_cmd_freelists_reconstruction_data",
+    "rogue_fwif_freelists_reconstruction_data",
 ]
 ARRAY_FLATTEN = 8
 EXTRA_FIELDS = {
@@ -67,7 +74,8 @@ EXTRA_FIELDS = {
     "rogue_fwif_kccb_cmd": ["cmd_data.cmd_kick_data", "cmd_data.combined_geom_frag_cmd_kick_data",
                             "cmd_data.combined_geom_frag_cmd_kick_data.geom_cmd_kick_data",
                             "cmd_data.combined_geom_frag_cmd_kick_data.frag_cmd_kick_data",
-                            "cmd_data.cleanup_data", "cmd_data.free_list_gs_data"],
+                            "cmd_data.cleanup_data", "cmd_data.free_list_gs_data",
+                            "cmd_data.free_lists_reconstruction_data"],
 }
 
 
@@ -146,6 +154,22 @@ TRACE = {
     "OPENFW_GROW_UPDATE": "Received grow update, FL addr: 0x%02x%08x, new pages: %u, ready pages: %u",
     "OPENFW_FL_GROW": "Freelist grow completed [0x%08x]: added pages 0x%08x, total pages 0x%08x, "
                       "new DevVirtAddr 0x%08x%08x",
+    "OPENFW_HWR_CHECK": "Final result for DM%u is HWRNeeded=%u with HWRChecksToGo=%u",
+    "OPENFW_HWR_TIMED_OUT": "DM%u timed out",
+    "OPENFW_HWR_CHANCE": "At least one other DM is running okay so DM%u will get another chance",
+    "OPENFW_HWR_LOCKED_UP": "DM%u has locked up",
+    "OPENFW_HWR_OVERRUN": "GPU has overrun its deadline",
+    "OPENFW_HWR_READY": "DM%u ready for HWR",
+    "OPENFW_HWR_BEGIN": "Begin hardware reset (HWR Counter=%d)",
+    "OPENFW_HWR_END": "Finished hardware reset (HWR Counter=%d)",
+    "OPENFW_HWR_SKIPPED": "Recovery DM%u: FWCtx 0x%08x skipped to command @ %u. PR=%u. "
+                          "New R-Flags=0x%08x",
+    "OPENFW_HWR_RECOVERED": "Recovery DM%u: DM fully recovered",
+    "OPENFW_HWR_DISCARD": "Discarded cmd on DM%u (reason=%u) HWRTData=0x%08x (st: %d), "
+                          "FWCtx 0x%08x @ %d",
+    "OPENFW_HWR_FL_REQUEST": "Requesting reconstruction for freelist 0x%x (ID=%d)",
+    "OPENFW_HWR_FL_DONE": "Reconstruction of freelist ID=%d complete",
+    "OPENFW_MMU_FAULT": "MMU fault event: 0x%08x",
 }
 
 

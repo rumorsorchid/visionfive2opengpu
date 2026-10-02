@@ -521,7 +521,7 @@ class Emu:
         osdata = obj("osdata", "rogue_fwif_osdata")
 
         # Values (fw_*_init in pvr_fw.c).
-        core_clock = 409600000
+        core_clock = int(os.environ.get("FWEMU_CORE_CLOCK", 409600000))
         S = "rogue_fwif_sysinit"
         self.set(S, SYSINIT_VA, "fault_phys_addr", self.pa(fault_page))
         self.set(S, SYSINIT_VA, "pds_exec_base", 0xDA00000000)

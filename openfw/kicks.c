@@ -353,6 +353,14 @@ static void pm_pause_ta_alloc(int pause)
 	poll_reg(0x02A8, 1, pause ? 1 : 0);
 }
 
+/* After a hardware recovery's GPU reset: the PM holds nothing any more. */
+void pm_hwr_reset(void)
+{
+	reg_write(0x02A0, reg_read(0x02A0) & ~1u);	/* TA allocation unpaused */
+	reg_write(0x0338, 0);				/* no partial render */
+	pm_reset();
+}
+
 /* Load free list @fl into PM context @c with @pages more pages at @base. */
 static void pm_fl_add(u32 c, u32 kind, u64 base, u32 pages)
 {
@@ -415,6 +423,7 @@ static void pr_stop_ta(struct job *j)
 	reg_write(0x0CB8, 2);			/* render target cache flush */
 	poll_reg(0x0CB8, 2, 0);
 	FW32(j->hwrt + OFF_HWRTDATA_STATE) = RTDATA_GEOM_OUTOFMEM;
+	hwr_done(DM_GEOM);			/* stopped, not locked up */
 }
 
 /* The partial render is done: count it and restart the stopped TA. */
@@ -430,6 +439,7 @@ void pr_finished(struct job *pr)
 	reg_write(0x0328, 1);			/* resume the TA */
 	reg_write(0x0CA8, 1);
 	FW32(pr->hwrt + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
+	hwr_kick(DM_GEOM, sched_running_job(DM_GEOM)->ctx);
 }
 
 void oom_geom(struct job *j)
@@ -503,6 +513,7 @@ void freelist_grow_update(u32 d)
 		reg_write(0x0CF8, 1);		/* restart the stopped TA */
 		FW32(fl + OFF_FREELIST_READY_PAGES) = newp - cur - add;
 		FW32(sched_running_hwrt(DM_GEOM) + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
+		hwr_kick(DM_GEOM, sched_running_job(DM_GEOM)->ctx);
 	} else {
 		FW32(fl + OFF_FREELIST_READY_PAGES) = newp - cur;
 	}

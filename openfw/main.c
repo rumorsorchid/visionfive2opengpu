@@ -27,7 +27,9 @@
 
 #define MMUCACHE_BIF_MASK	0xFu	/* PT | PD | PC | TLB1 -> BIF_CTRL_INVAL */
 
-#define TIMER_PERIOD		0x01000000u
+/* CP0 Count runs at half the core clock, the GPU timer at 1/256: one
+ * period is the lockup check interval, 31250 GPU timer ticks (hwr.c) */
+#define TIMER_PERIOD		(31250u << 7)
 
 #define TRAP_EXCEPTION		0
 #define TRAP_TIMER		1
@@ -52,7 +54,7 @@ static const u32 group_bit[16] = {
 	0x20, 0x4000, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x80000000u,
 };
 
-static u64 timer_read(void)
+u64 timer_read(void)
 {
 	u32 hi, lo;
 
@@ -119,7 +121,7 @@ void host_irq(void)
 }
 
 /* Post a command to the kernel's firmware CCB (pvr_fwccb_process). */
-void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2)
+void fwccb_post(u32 type, const u32 *data, u32 n)
 {
 	u32 ctl = g.fwccb_ctl;
 	u32 wo = FW32(ctl + OFF_CCB_CTL_WRITE_OFFSET);
@@ -131,12 +133,18 @@ void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2)
 	for (u32 i = 0; i < SIZEOF_FWCCB_CMD; i += 4)
 		FW32(cmd + i) = 0;
 	FW32(cmd + OFF_FWCCB_CMD_CMD_TYPE) = type;
-	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA) = a0;
-	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA + 4) = a1;
-	FW32(cmd + OFF_FWCCB_CMD_CMD_DATA + 8) = a2;
+	for (u32 i = 0; i < n; i++)
+		FW32(cmd + OFF_FWCCB_CMD_CMD_DATA + 4 * i) = data[i];
 	mips_sync();
 	FW32(ctl + OFF_CCB_CTL_WRITE_OFFSET) = (wo + 1) & wrap;
 	host_irq();
+}
+
+void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2)
+{
+	const u32 d[3] = { a0, a1, a2 };
+
+	fwccb_post(type, d, 3);
 }
 
 /* Tell the MTS the current task has finished (the write is read back). */
@@ -269,7 +277,8 @@ static u32 kccb_handle(u32 cmd, u32 type, u32 slot)
 		cmd_pow(cmd);
 		return KCCB_NO_RTN;	/* the kernel waits for power_sync */
 	case KCCB_FREELISTS_RECONSTRUCTION_UPDATE:
-		/* answers a reconstruction request, which openfw never makes */
+		/* answers the request a hardware recovery made (hwr.c) */
+		hwr_reconstruction_done(cmd + OFF_KCCB_CMD_CMD_DATA_FREE_LISTS_RECONSTRUCTION_DATA);
 		return KCCB_NO_RTN;
 	case KCCB_LOGTYPE_UPDATE:
 		/* log_type is re-read on every trace */
@@ -361,6 +370,8 @@ static void fw_irq_task(void)
 		EVENT_PM_3D_MEM_FREE | EVENT_PM_OUT_OF_MEMORY);
 	if (ev)
 		reg_write(CR_EVENT_CLEAR, ev);
+	if (ev & EVENT_MMU_PAGE_FAULT)
+		hwr_page_fault();
 	sched_irq();
 	mts_task_done(MTS_TASK_DONE_IRQ);
 }
@@ -369,6 +380,7 @@ static void fw_timer(void)
 {
 	mtc0(C0_COMPARE, 0, mfc0(C0_COUNT, 0) + TIMER_PERIOD);
 	g.kccb_irq = 0;
+	hwr_timer();		/* lockup detection and recovery */
 	kccb_process();		/* safety net for a lost MTS kick */
 	sched_irq();		/* ... and for a lost interrupt task: handles any
 				 * pending completion, then schedules */
@@ -493,7 +505,9 @@ void __attribute__((noreturn)) fw_main(void)
 	g.power_sync = FW32(g.osdata + OFF_OSDATA_POWER_SYNC_FW_ADDR);
 	g.sysdata = FW32(sysinit + OFF_SYSINIT_FW_SYS_DATA_FW_ADDR);
 	g.tracebuf_ctl = FW32(sysinit + OFF_SYSINIT_TRACE_BUF_CTL_FW_ADDR);
+	g.hwrinfobuf = FW32(osinit + OFF_OSINIT_ROGUE_FWIF_HWR_INFO_BUF_CTL_FW_ADDR);
 	g.dusts = 1;
+	hwr_init();
 
 	gpu_init();
 

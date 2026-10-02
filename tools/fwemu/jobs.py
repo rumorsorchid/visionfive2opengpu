@@ -92,11 +92,25 @@ class Runner:
         self.tags = {}
         self.steps = []
         self.watch = {}
+        self.watch_times = {}
         self.kicks = []          # kicks in the current step (reports)
         self._kick_hist = []     # every kick, completed in order by the model
         self.oom_left = self.p["oom"]
         self.ta_stalled = False
         self.ta_hold = False     # scenario keeps the TA running
+        self.hang = set(self.p["hang"])  # data masters whose work never finishes
+        self.time_offset = 0     # added to the GPU timer (scenario time jumps)
+        self.reg_values = {}     # register reads overridden by the scenario
+        orig_read = self.emu.reg_model_read
+
+        def model_read(off):
+            if off in (0x0160, 0x0164):
+                t = self.emu.insns // 16 + self.time_offset
+                return t & 0xffffffff if off == 0x0160 else t >> 32
+            if off in self.reg_values:
+                return self.reg_values[off]
+            return orig_read(off)
+        self.emu.reg_model_read = model_read
         orig = self.emu.reg_model_write
 
         def model_write(off, value):
@@ -107,6 +121,11 @@ class Runner:
                 self._kick_hist.append(o)
             if o == 0x0328 and value & 1:
                 self.ta_stalled = False      # TA resumed after out-of-memory
+            if o == 0x0100 and value:
+                # soft reset: work still running on the GPU is lost
+                done = getattr(self, "_done_kicks", 0)
+                del self._kick_hist[done:]
+                self.ta_stalled = False
         self.emu.reg_model_write = model_write
 
     def out(self):
@@ -130,11 +149,22 @@ class Runner:
             if isinstance(v, int) and (v & 0xFFFFFFFF) & 0xFF000000 == 0x5A000000 and v >> 32:
                 self.tags[v & 0xFFFFFFFF] = "%s.%s" % (sname.replace("rogue_fwif_", ""), path)
 
-    def watch_obj(self, name, va, size):
+    def watch_obj(self, name, va, size, times=()):
+        """times: offsets of 64-bit timestamps inside the object; they
+        depend on instruction counts, so only whether they are set is
+        compared."""
         self.watch[name] = (va, size)
+        self.watch_times[name] = times
 
     def snapshot(self):
-        return {n: self.emu.read(va, sz) for n, (va, sz) in self.watch.items()}
+        snap = {}
+        for n, (va, sz) in self.watch.items():
+            data = bytearray(self.emu.read(va, sz))
+            for off in self.watch_times.get(n, ()):
+                if any(data[off:off + 8]):
+                    data[off:off + 8] = (1).to_bytes(8, "little")
+            snap[n] = bytes(data)
+        return snap
 
     def mark(self, name):
         """Close the current step: collect register writes, memory changes
@@ -183,11 +213,14 @@ class Runner:
         if done >= len(self.all_kicks()):
             return False
         off = self.all_kicks()[done]
-        if KICKS[off][0] == "TA" and (self.ta_stalled or self.ta_hold):
-            # a stalled TA only completes after the firmware resumes it;
-            # complete the next other kick instead
+        def held(o):
+            dm = KICKS[o][0]
+            return dm in self.hang or (dm == "TA" and (self.ta_stalled or self.ta_hold))
+        if held(off):
+            # a stalled TA only completes after the firmware resumes it, a
+            # hung data master never; complete the next other kick instead
             for i in range(done + 1, len(self._kick_hist)):
-                if KICKS[self._kick_hist[i]][0] != "TA":
+                if not held(self._kick_hist[i]):
                     self._kick_hist.insert(done, self._kick_hist.pop(i))
                     off = self._kick_hist[done]
                     break
@@ -235,6 +268,28 @@ class Runner:
 
     def kccb_bg(self):
         self.emu.pending_tasks.append("bg")
+
+    def page_fault(self, label, cat_base=1, addr=0xA000123450, write=False, tag=0x3):
+        """The GPU MMU faults on an access through page catalogue set
+        cat_base (BIF_CAT_BASE<n>): fault status in bank 0, MMU_PAGE_FAULT
+        event, interrupt task."""
+        e = self.emu
+        e.regs[0x12B0] = (cat_base << 12) | 1                 # FAULT
+        e.regs[0x12B4] = 0
+        req = (addr & 0xFFFFFFFFF0) | (tag << 40) | (0 if write else 1 << 50)
+        e.regs[0x12B8] = req & 0xFFFFFFFF
+        e.regs[0x12BC] = req >> 32
+        e.event_status |= 1 << 9
+        e.pending_tasks.append("irq")
+        return self.settle(label)
+
+    def tick(self, label, dt=0x10000, regs=None):
+        """Let dt GPU timer ticks pass and deliver the firmware's timer
+        interrupt (its periodic work: lockup checks, safety nets)."""
+        self.time_offset += dt
+        self.reg_values.update(regs or {})
+        self.emu.pending_tasks.append("timer")
+        return self.settle(label)
 
     # -- reports ---------------------------------------------------------------------------
     def reg_name(self, off):
@@ -284,6 +339,7 @@ DEFAULT_PARAMS = {
     "oom": 0,                        # PM out-of-memory events raised during TAs
     "grow_fail": 0,                  # the kernel cannot grow free lists
     "oom_regs": {},                  # {register: value} set with each OOM event
+    "hang": (),                      # data masters ("CDM", "TA", "3D") that never finish
 }
 
 
@@ -760,6 +816,399 @@ def sc_suspend(r, n=3):
     return {"done": out, "geom_ufo": gq.ufo_value(), "frag_ufo": fq.ufo_value()}
 
 
+HWRINFO_TIMES = (0x20, 0x28, 0x58, 0x60, 0x68, 0x70)
+
+
+def watch_hwr(r):
+    """What a hardware recovery leaves for the host: context reset
+    notifications in the firmware CCB, the HWR info buffer, power state."""
+    e, L = r.emu, r.host.L
+    r.watch_obj("fwccb_ctl", e.fwccb_ctl, 16)
+    r.watch_obj("fwccb", e.fwccb, 2 * L.size("rogue_fwif_fwccb_cmd"))
+    hib = e.objects["hwrinfobuf"][0]
+    r.watch_obj("hwrinfo0", hib, 0x88, HWRINFO_TIMES)
+    r.watch_obj("hwrinfo1", hib + 0x88, 0x88, HWRINFO_TIMES)
+    r.watch_obj("hwrcounters", hib + 0x880, L.size("rogue_fwif_hwrinfobuf") - 0x880)
+    r.watch_obj("pow_state", e.objects["sysdata"][0] + 8, 4)
+
+
+def wait_recovery(r, jobs_, ticks, regs=None):
+    """Timer ticks until the hung jobs are finished (by recovery)."""
+    n = 0
+    while n < ticks and not all(j.done() for j in jobs_):
+        r.tick("timer %d" % n, regs=regs(n) if regs else None)
+        n += 1
+    return n
+
+
+def sc_hang_compute(r, ticks=24, progress=0):
+    """A compute job that never finishes: the firmware's lockup detection
+    and recovery, then the next job on the same context. progress: for
+    that many timer ticks the CDM signature register keeps changing."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang.add("CDM")
+    j = compute_job(r, ctx)
+    h.submit(j)
+    r.kccb_bg()
+    r.settle("compute job (hangs)")
+    n = wait_recovery(r, [j], ticks,
+                      lambda i: {0x40F8: 0x1000 + i} if i < progress else None)
+    fw = h.fwccb_process()
+    r.hang.discard("CDM")
+    j2 = compute_job(r, ctx, base=0x10)
+    h.submit(j2)
+    r.kccb_bg()
+    r.settle("next compute job")
+    return {"ticks": n, "done": [j.done(), j2.done()], "ufo": q.ufo_value(),
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_hang_render(r, dm="TA", ticks=24):
+    """A render whose geometry (dm="TA") or fragment ("3D") work never
+    finishes; then the next frame."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang.add(dm)
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry + PR kick")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment kick")
+    n = wait_recovery(r, [geom, frag], ticks)
+    fw = h.fwccb_process()
+    if fw:
+        r.kccb_bg()
+        r.settle("host answers")
+    r.hang.discard(dm)
+    geom2, pr2, frag2 = render_jobs(r, ctx, rt.data[0], 0x200, deps=[frag.fence()])
+    h.submit_combined(geom2, pr2)
+    r.kccb_bg()
+    r.settle("next geometry")
+    h.submit(frag2)
+    r.kccb_bg()
+    r.settle("next fragment")
+    return {"ticks": n, "done": [geom.done(), pr.done(), frag.done(), geom2.done(),
+                                 frag2.done()],
+            "ufo": [gq.ufo_value(), fq.ufo_value()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_hang_transfer(r, ticks=12, next_transfer=False):
+    """A transfer job (3D pipe, no render target) that never finishes;
+    then a compute job, or (next_transfer) another transfer job: the
+    reference firmware faults in that one's completion (a stale pointer in
+    its transfer bookkeeping after the recovery), so only openfw runs it."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    cctx = h.compute_context(vm)
+    ctx = h.transfer_context(vm)
+    q = ctx.queues["transfer"]
+    watch_queue(r, q, "transfer")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang.add("3D")
+    vals = fields(r, "rogue_fwif_cmd_transfer", 0)
+    r.tag_fields("rogue_fwif_cmd_transfer", vals)
+    j = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+    h.submit(j)
+    r.kccb_bg()
+    r.settle("transfer job (hangs)")
+    n = wait_recovery(r, [j], ticks)
+    fw = h.fwccb_process()
+    r.hang.discard("3D")
+    if next_transfer:
+        j2 = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+    else:
+        j2 = compute_job(r, cctx)
+    h.submit(j2)
+    r.kccb_bg()
+    r.settle("next job")
+    return {"ticks": n, "done": [j.done(), j2.done()], "ufo": q.ufo_value(),
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_hang_compute_usc(r, ticks=40, progress=10, twice=False):
+    """Compute work holding USC slots whose state changes for `progress`
+    ticks (the signature registers stay put), then stops; with twice, a
+    second job hangs the same way after the recovery."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang.add("CDM")
+    r.reg_values.update({0x4178: 0x22222222, 0x417C: 0x00000022})
+    res = {"ticks": [], "done": []}
+    for k in range(2 if twice else 1):
+        j = compute_job(r, ctx, base=0x10 * k)
+        h.submit(j)
+        r.kccb_bg()
+        r.settle("compute job %d (hangs)" % k)
+        n = wait_recovery(r, [j], ticks, lambda i: {0x41E0: 0x100 + i + 64 * k}
+                          if i < progress else None)
+        res["ticks"].append(n)
+        res["done"].append(j.done())
+    res["fwccb"] = [(hex(t), sorted(i.items())) for t, i in h.fwccb_process()]
+    res["ufo"] = q.ufo_value()
+    return res
+
+
+def sc_overrun(r, ticks=20, dt=0x400000):
+    """A compute job that keeps making progress but runs past its
+    context's deadline (30 s)."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang.add("CDM")
+    j = compute_job(r, ctx)
+    h.submit(j)
+    r.kccb_bg()
+    r.settle("compute job (runs too long)")
+    n = 0
+    while n < ticks and not j.done():
+        r.tick("timer %d" % n, dt=dt, regs={0x40F8: 0x1000 + n})
+        n += 1
+    fw = h.fwccb_process()
+    return {"ticks": n, "done": j.done(), "ufo": q.ufo_value(),
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_hang_ta_compute_ok(r, ticks=24):
+    """Geometry hangs while a compute job makes progress and then finishes
+    normally: the geometry waits for it, then is recovered alone."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    cctx = h.compute_context(vm)
+    cq = cctx.queues["compute"]
+    ctx, fl, gfl, (rt,) = new_render(r, vm)
+    gq = ctx.queues["geometry"]
+    watch_queue(r, cq, "compute")
+    watch_queue(r, gq, "geom")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang |= {"CDM", "TA"}
+    cj = compute_job(r, cctx)
+    h.submit(cj)
+    r.kccb_bg()
+    r.settle("compute job (busy)")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry (hangs)")
+    n = 0
+    while n < ticks and not geom.done():
+        if n == 8:
+            r.hang.discard("CDM")       # the compute job finishes
+            r.settle("compute finishes")
+        r.tick("timer %d" % n, regs={0x40F8: 0x1000 + n} if n < 8 else None)
+        n += 1
+    fw = h.fwccb_process()
+    return {"ticks": n, "done": [cj.done(), geom.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_fault_compute(r, ticks=24, kind="compute"):
+    """A compute (or geometry) job whose memory access faults in the GPU
+    MMU; then the next job."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    if kind == "compute":
+        ctx = h.compute_context(vm)
+        q = ctx.queues["compute"]
+        watch_queue(r, q, "compute")
+    else:
+        ctx, fl, gfl, (rt,) = new_render(r, vm)
+        q = ctx.queues["geometry"]
+        watch_queue(r, q, "geom")
+        watch_queue(r, ctx.queues["fragment"], "frag")
+        r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    watch_hwr(r)
+    r.mark("setup")
+    dm = "CDM" if kind == "compute" else "TA"
+    r.hang.add(dm)
+    if kind == "compute":
+        jobs_ = [compute_job(r, ctx)]
+        h.submit(jobs_[0])
+    else:
+        geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+        jobs_ = [geom]
+        h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("job")
+    r.page_fault("page fault")
+    n = wait_recovery(r, jobs_, ticks)
+    fw = h.fwccb_process()
+    if fw:
+        r.kccb_bg()
+        r.settle("host answers")
+    r.hang.discard(dm)
+    if kind == "compute":
+        j2 = compute_job(r, ctx, base=0x10)
+        h.submit(j2)
+        r.kccb_bg()
+        r.settle("next job")
+        jobs_.append(j2)
+    return {"ticks": n, "done": [j.done() for j in jobs_],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_fault_two(r, ticks=24, which=1):
+    """Compute (VM A) and geometry (VM B) busy; the MMU faults through
+    page catalogue set `which` (1: VM A's, 2: VM B's)."""
+    h = r.host
+    vma = h.vm_context(r.p["pc"])
+    vmb = h.vm_context(r.p["pc"] + 0x1000000)
+    cctx = h.compute_context(vma)
+    cq = cctx.queues["compute"]
+    ctx, fl, gfl, (rt,) = new_render(r, vmb)
+    gq = ctx.queues["geometry"]
+    watch_queue(r, cq, "compute")
+    watch_queue(r, gq, "geom")
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang |= {"CDM", "TA"}
+    cj = compute_job(r, cctx)
+    h.submit(cj)
+    r.kccb_bg()
+    r.settle("compute job")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry")
+    r.page_fault("page fault", cat_base=which)
+    n = wait_recovery(r, [cj, geom], ticks)
+    fw = h.fwccb_process()
+    if fw:
+        r.kccb_bg()
+        r.settle("host answers")
+    return {"ticks": n, "done": [cj.done(), geom.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
+def sc_oom_wait(r, ticks=12, pr_ticks=0):
+    """Geometry out of parameter memory, waiting for the kernel's grow
+    (fl_threshold 0: no ready pages) while timer ticks pass: the kernel
+    answers late. With pr_ticks and a free list at its maximum, the
+    partial render on the 3D pipe takes that many ticks instead."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    watch_hwr(r)
+    r.mark("setup")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    if pr_ticks:
+        r.hang.add("3D")
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry, out of memory")
+    for i in range(pr_ticks or ticks):
+        r.tick("timer %d" % i, regs={0x5038: 0x100 + i} if pr_ticks else None)
+    r.hang.discard("3D")
+    r.settle("partial render finishes")
+    cmds = h.fwccb_process()
+    r.kccb_bg()
+    r.settle("grow update")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"done": [geom.done(), pr.done(), frag.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
+
+
+def sc_oom_wait_hang(r, wait=3, ticks=12):
+    """Geometry waits `wait` ticks for a free list grow, resumes when it
+    arrives and then never finishes."""
+    h = r.host
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    watch_hwr(r)
+    r.mark("setup")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry, out of memory")
+    for i in range(wait):
+        r.tick("waiting %d" % i)
+    r.hang.add("TA")
+    cmds = h.fwccb_process()
+    r.kccb_bg()
+    r.settle("grow update, TA resumes")
+    n = wait_recovery(r, [geom], ticks)
+    cmds += h.fwccb_process()
+    return {"ticks": n, "done": [geom.done(), pr.done()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
+
+
+def sc_hang_two(r, ticks=24, ta_progress=0):
+    """Compute and geometry hung together (innocent / guilty work);
+    ta_progress: ticks for which the geometry signature keeps changing."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    cctx = h.compute_context(vm)
+    cq = cctx.queues["compute"]
+    ctx, fl, gfl, (rt,) = new_render(r, vm)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, cq, "compute")
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    watch_hwr(r)
+    r.mark("setup")
+    r.hang |= {"CDM", "TA"}
+    cj = compute_job(r, cctx)
+    h.submit(cj)
+    r.kccb_bg()
+    r.settle("compute job (hangs)")
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry (hangs)")
+    n = wait_recovery(r, [cj, geom], ticks,
+                      lambda i: {0x5000: 0x1000 + i} if i < ta_progress else None)
+    fw = h.fwccb_process()
+    if fw:
+        r.kccb_bg()
+        r.settle("host answers")
+    r.hang -= {"CDM", "TA"}
+    r.settle("after recovery")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"ticks": n, "done": [cj.done(), geom.done(), pr.done(), frag.done()],
+            "ufo": [cq.ufo_value(), gq.ufo_value(), fq.ufo_value()],
+            "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
+
+
 def sc_power(r):
     """Kernel CCB maintenance and power commands without jobs: health
     check, forced idle and cancel, MMU cache flush, log type, number of
@@ -842,6 +1291,25 @@ SCENARIOS = {
     "power": sc_power,
     "priority": sc_priority,
     "priority2": lambda r: sc_priority(r, prios=(2, 1, 0, 2)),
+    "hang-compute": sc_hang_compute,
+    "hang-compute-progress": lambda r: sc_hang_compute(r, ticks=40, progress=12),
+    "hang-ta": lambda r: sc_hang_render(r, "TA"),
+    "hang-two": sc_hang_two,
+    "hang-transfer": sc_hang_transfer,
+    "hang-transfer-next": lambda r: sc_hang_transfer(r, next_transfer=True),
+    "hang-compute-usc": sc_hang_compute_usc,
+    "hang-compute-twice": lambda r: sc_hang_compute_usc(r, ticks=30, progress=4, twice=True),
+    "overrun": sc_overrun,
+    "fault-compute": sc_fault_compute,
+    "fault-geom": lambda r: sc_fault_compute(r, kind="geom"),
+    "fault-two": sc_fault_two,
+    "oom-wait": sc_oom_wait,
+    "oom-wait-hang": sc_oom_wait_hang,
+    "pr-slow": lambda r: sc_oom_wait(r, pr_ticks=10),
+    "fault-two-b": lambda r: sc_fault_two(r, which=2),
+    "hang-ta-compute-ok": sc_hang_ta_compute_ok,
+    "hang-two-progress": lambda r: sc_hang_two(r, ticks=30, ta_progress=20),
+    "hang-3d": lambda r: sc_hang_render(r, "3D"),
 }
 
 

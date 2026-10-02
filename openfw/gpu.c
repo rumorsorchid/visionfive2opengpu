@@ -28,18 +28,30 @@ struct op {
 
 /*
  * Executed before the first job after boot (and after a power-down of
- * the units): release the soft resets, configure SLC, PDS/USC execution
- * bases, pipeline and TPU defaults.
+ * the units), and by a hardware recovery: release the soft resets,
+ * configure SLC, PDS/USC execution bases, pipeline and TPU defaults.
  */
-static const struct op units_init_ops[] = {
-	/* soft reset release, in two steps, each read back */
+static const struct op soft_reset_ops[] = {
 	W(0x0100, 0xF3FFFC1D), W(0x0104, 0xFFEFFFF8), R(0x0100),
+	{ OP_END, 0, 0 },
+};
+
+/* hardware recovery: everything into reset first, the MIPS wrapper too */
+static const struct op hwr_soft_reset_ops[] = {
+	W(0x0100, 0xF3FFFC1D), W(0x0104, 0xFFEFFFF8), R(0x0100),
+	W(0x0100, 0xF3FFFC1D), W(0x0104, 0xFFEFFFFC), R(0x0100),
+	{ OP_END, 0, 0 },
+};
+
+static const struct op soft_reset_release_ops[] = {
+	/* soft reset release, in two steps, each read back */
 	W(0x0100, 0x13FFFC1D), W(0x0104, 0xFFEFFE00), R(0x0100),
 	W(0x0100, 0x00000000), W(0x0104, 0x00000000), R(0x0100),
 	W(0x0050, 1),
-	/* SLC flush/invalidate of MMU data, MMU cache invalidate */
-	W(CR_SLC_CTRL_FLUSH_INVAL, SLC_FLUSH_INVAL_DM_MMU), P0(CR_SLC_STATUS0, 0x4),
-	W(CR_BIF_CTRL_INVAL, 0xC), P0(CR_BIF_CTRL_INVAL, 0xC),
+	{ OP_END, 0, 0 },
+};
+
+static const struct op units_init_ops[] = {
 	R(0x3970),				/* SLC_SIZE_IN_KB */
 	OR(0x3828, 0x01000000), OR(0x382C, 0x00002000),	/* SLC_CTRL_BYPASS */
 	W(0x6000, 1), W(0x6000, 0),
@@ -73,6 +85,11 @@ static const struct op units_init_ops[] = {
 	W(0x1788, 0x20), W(0x178C, 0x20), W(0x1870, 0x20), W(0x1874, 0x20), W(0x1878, 0x20),
 	W(0x187C, 0x20),
 	W(0xF338, 0), W(0xF318, 0),
+	{ OP_END, 0, 0 },
+};
+
+/* first initialisation only (not after a hardware recovery) */
+static const struct op units_init_tail_ops[] = {
 	W(0x6330, 1), W(0x6300, 1), W(0x6300, 0), R(0x6318),
 	{ OP_END, 0, 0 },
 };
@@ -112,9 +129,40 @@ void gpu_cancel_power_off(void)
 
 void gpu_units_init(void)
 {
+	run_ops(soft_reset_ops);
+	run_ops(soft_reset_release_ops);
+	/* SLC flush/invalidate of MMU data, MMU cache invalidate */
+	gpu_slc_mmu_flush_nofence(0xC);
 	run_ops(units_init_ops);
+	run_ops(units_init_tail_ops);
 	gpu_units_on = 1;
 	gpu_cancel_power_off();
+}
+
+/*
+ * Hardware recovery: with memory traffic stopped (0x1340) and the GPU
+ * idle, put every unit back into reset and initialise them again. Page
+ * catalogue registers survive; parameter-manager state does not.
+ */
+void gpu_hwr_reset(void)
+{
+	reg_write(CR_XPU_BROADCAST, 1);
+	reg_write(0x1340, reg_read(0x1340) | 1);
+	poll_reg(CR_BIFPM_STATUS_MMU, 0xFF, 0);
+	poll_reg(CR_BIFPM_READS_EXT_STATUS, 0xFFFF, 0);
+	gpu_slc_mmu_flush(0xC);
+	poll_reg(CR_SIDEKICK_IDLE, 0x20, 0x20);
+	poll_reg(CR_SLC_IDLE, 0xFF, 0xFF);
+	run_ops(hwr_soft_reset_ops);
+	run_ops(soft_reset_release_ops);
+	gpu_slc_mmu_flush(0xC);
+	run_ops(units_init_ops);
+	reg_write(0x1340, reg_read(0x1340) & ~1u);
+	reg_write(0x1608, 0x78001);
+	poll_reg(0x1608, 1, 0);
+	gpu_slc_flush(SLC_FLUSH_INVAL_ALL);
+	reg_write(CR_XPU_BROADCAST, 1);
+	gpu_units_on = 1;
 }
 
 /* SLC flush + invalidate of MMU data, BIF invalidate, then 0x1348. */
