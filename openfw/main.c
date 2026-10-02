@@ -370,7 +370,8 @@ static void fw_timer(void)
 	mtc0(C0_COMPARE, 0, mfc0(C0_COUNT, 0) + TIMER_PERIOD);
 	g.kccb_irq = 0;
 	kccb_process();		/* safety net for a lost MTS kick */
-	sched_run();
+	sched_irq();		/* ... and for a lost interrupt task: handles any
+				 * pending completion, then schedules */
 	if (g.halt)
 		halt();
 }
