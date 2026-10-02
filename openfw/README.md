@@ -34,7 +34,7 @@ now.
 | Container + device info accepted by the driver's parser | `tools/pvrfw.py pack --compare` | device info byte-identical to Imagination's; re-packing Imagination's own ELF reproduces their file byte for byte |
 | Boot-time register programming | `tools/fwemu --trace-regs`, diffed against the reference | identical |
 | Kernel contract: probe, health check, MMU flush, log type, forced idle, power off, resume | `test_contract.py` (25 checks, the driver's own sequence) | all pass, as for Imagination's image |
-| GPU jobs and power, step by step | `test_jobs.py`: 82 cases over 46 scenarios, both firmwares, same kernel structures and hardware model | **identical register writes, polls, host-visible memory and results** in all 82 |
+| GPU jobs and power, step by step | `test_jobs.py`: 83 cases over 47 scenarios, both firmwares, same kernel structures and hardware model | **identical register writes, polls, host-visible memory and results** in all 83 |
 | Every userspace command field and kernel flag | `test_jobs.py --sweep`: each field of `pvr_stream_defs.c` and each kernel-settable flag bit set to bit patterns | **638 of 638** identical |
 | Desktop-like traffic | `test_jobs.py --stress N`: seeded random mixes (below) | **160 of 160** workloads identical |
 | No use of freed memory | every completed `CLEANUP` arms a write trap on the freed object (and a context's CCB control); any later firmware write fails the case | none, in every case and workload above |
@@ -69,7 +69,9 @@ The step-by-step scenarios (`tools/fwemu/jobs.py`):
   waiting on one fence at once), `*-wrap` (the GPU timer's low 32 bits
   wrap during the work, i.e. after about 46 minutes of the GPU powered),
   `*-396`, `*-594` (the vendor clock rates), `fwccb-full` (the kernel is
-  slow to read the firmware CCB when a free list grow must be requested).
+  slow to read the firmware CCB when a free list grow must be requested),
+  `blocked-power` (a context still waiting on a fence when the GPU powers
+  down).
 * **Stress:** `stress<seed>`: a compositor-like render context drawing
   frames on two HWRT data sets, applications' compute and transfer work in
   one or two VMs, priorities, cross-queue fences, completions in any
@@ -93,6 +95,9 @@ covered by a case):
 * With the firmware CCB full, a free list grow request was dropped and
   that render never finished. The firmware now waits for the kernel's
   interrupt thread to make room, as Imagination's does.
+* A context still waiting on a fence when the GPU powered down was
+  forgotten by the restarted firmware. The ready list now survives power
+  cycles, as Imagination's lists do.
 * Twelve scheduling and parameter-manager details (which context runs
   first, which page catalogue set is reused, when the PM is paused or
   the PC cache flushed) differed from Imagination's firmware.

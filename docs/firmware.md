@@ -113,7 +113,7 @@ Imagination's firmware can be traced to the field it came from;
 `vary.py` changes one input at a time and `sweep.py` sets fields to
 patterns, which separates values the firmware computes from values it
 copies. openfw implements the result and `openfw/test_jobs.py` compares
-the two firmwares step by step (82 cases, 638 field values and 160
+the two firmwares step by step (83 cases, 638 field values and 160
 randomised desktop-like workloads, all identical).
 
 **Client CCB.** `KICK` carries the new write offset; the firmware moves
