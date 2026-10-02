@@ -20,17 +20,33 @@
  */
 #include "fw.h"
 
-#define MAX_READY 32
-
 /*
  * Contexts with unprocessed commands, in the order they became runnable:
  * a context stopped at an unsatisfied fence with nothing before it is
  * "blocked" and goes to the back when the fence is satisfied, as in the
  * reference firmware.
+ *
+ * The list has no size limit: it is linked through the contexts' own
+ * run_node, which the kernel leaves to the firmware (as waiting_node and
+ * wait_signal_node). waiting_node.n marks a listed context (with the
+ * list's epoch, nonzero); waiting_node.p is the "blocked" flag;
+ * wait_signal_node.n chains the contexts of one scheduling pass.
+ *
+ * Like the reference firmware's lists it survives a GPU power cycle (the
+ * firmware restarts, its memory and the contexts' stay), so a context
+ * still waiting on a fence is not forgotten. A kernel hard reset clears
+ * both the firmware data and the contexts.
  */
-static u32 ready[MAX_READY];
-static u8 blocked[MAX_READY];
-static u32 nready;
+#define RUN_PREV(c)	FW32((c) + OFF_FWCOMMONCONTEXT_RUN_NODE_P)
+#define RUN_NEXT(c)	FW32((c) + OFF_FWCOMMONCONTEXT_RUN_NODE_N)
+#define IS_BLOCKED(c)	FW32((c) + OFF_FWCOMMONCONTEXT_WAITING_NODE_P)
+#define LISTED(c)	FW32((c) + OFF_FWCOMMONCONTEXT_WAITING_NODE_N)
+#define PASS_NEXT(c)	FW32((c) + OFF_FWCOMMONCONTEXT_WAIT_SIGNAL_NODE_N)
+
+static u32 ready_head __attribute__((section(".persist")));
+static u32 ready_tail __attribute__((section(".persist")));
+static u32 nready __attribute__((section(".persist")));
+static u32 epoch __attribute__((section(".persist")));
 static struct job running[DM_COUNT];
 
 /* a partial render to run on the 3D pipe (see spm_try) */
@@ -43,48 +59,113 @@ static u32 pow_query;		/* idle seen, not reported yet (sched_idle_report) */
 
 static int ctx_is_ready(u32 ctx)
 {
-	for (u32 i = 0; i < nready; i++)
-		if (ready[i] == ctx)
-			return 1;
-	return 0;
+	return LISTED(ctx) == epoch;
 }
 
 static void ready_add(u32 ctx)
 {
-	if (!ctx_is_ready(ctx) && nready < MAX_READY) {
-		blocked[nready] = 0;
-		ready[nready++] = ctx;
-	}
+	if (ctx_is_ready(ctx))
+		return;
+	LISTED(ctx) = epoch;
+	IS_BLOCKED(ctx) = 0;
+	RUN_PREV(ctx) = ready_tail;
+	RUN_NEXT(ctx) = 0;
+	if (ready_tail)
+		RUN_NEXT(ready_tail) = ctx;
+	else
+		ready_head = ctx;
+	ready_tail = ctx;
+	nready++;
 }
 
 static void ready_del(u32 ctx)
 {
-	for (u32 i = 0; i < nready; i++) {
-		if (ready[i] == ctx) {
-			for (; i + 1 < nready; i++) {
-				ready[i] = ready[i + 1];
-				blocked[i] = blocked[i + 1];
-			}
-			nready--;
-			return;
-		}
-	}
+	u32 p, n;
+
+	if (!ctx_is_ready(ctx))
+		return;
+	p = RUN_PREV(ctx);
+	n = RUN_NEXT(ctx);
+	if (p)
+		RUN_NEXT(p) = n;
+	else
+		ready_head = n;
+	if (n)
+		RUN_PREV(n) = p;
+	else
+		ready_tail = p;
+	LISTED(ctx) = 0;
+	nready--;
 }
 
 /* Track whether @ctx waits on a fence; a context unblocked goes last. */
 static void ready_set_blocked(u32 ctx, int b)
 {
-	for (u32 i = 0; i < nready; i++) {
-		if (ready[i] != ctx)
-			continue;
-		if (b) {
-			blocked[i] = 1;
-		} else if (blocked[i]) {
-			ready_del(ctx);
-			ready_add(ctx);
-		}
+	if (!ctx_is_ready(ctx))
 		return;
+	if (b) {
+		IS_BLOCKED(ctx) = 1;
+	} else if (IS_BLOCKED(ctx)) {
+		ready_del(ctx);
+		ready_add(ctx);
 	}
+}
+
+/*
+ * The ready contexts of @dm chained through PASS_NEXT, so that the order
+ * is fixed before any of them is processed: with @by_priority the
+ * runnable ones, highest priority first, then in list order, and after
+ * them the blocked ones in list order (the reference firmware's run and
+ * waiting lists); else all of them in list order.
+ */
+static u32 ready_pass(u32 dm, int by_priority)
+{
+	u32 first = 0, last = 0;
+
+	for (u32 c = ready_head; c; c = RUN_NEXT(c)) {
+		u32 p = FW32(c + OFF_FWCOMMONCONTEXT_PRIORITY), prev = 0, cur = first;
+
+		if (FW32(c + OFF_FWCOMMONCONTEXT_DM) != dm)
+			continue;
+		if (by_priority && IS_BLOCKED(c))
+			continue;
+		if (!by_priority) {
+			PASS_NEXT(c) = 0;
+			if (last)
+				PASS_NEXT(last) = c;
+			else
+				first = c;
+			last = c;
+			continue;
+		}
+		/* stable insertion by descending priority */
+		while (cur && FW32(cur + OFF_FWCOMMONCONTEXT_PRIORITY) >= p) {
+			prev = cur;
+			cur = PASS_NEXT(cur);
+		}
+		PASS_NEXT(c) = cur;
+		if (prev)
+			PASS_NEXT(prev) = c;
+		else
+			first = c;
+	}
+	if (by_priority) {
+		/* the blocked ones last, in list order */
+		last = first;
+		while (last && PASS_NEXT(last))
+			last = PASS_NEXT(last);
+		for (u32 c = ready_head; c; c = RUN_NEXT(c)) {
+			if (FW32(c + OFF_FWCOMMONCONTEXT_DM) != dm || !IS_BLOCKED(c))
+				continue;
+			PASS_NEXT(c) = 0;
+			if (last)
+				PASS_NEXT(last) = c;
+			else
+				first = c;
+			last = c;
+		}
+	}
+	return first;
 }
 
 int sched_dm_busy(u32 dm)
@@ -111,12 +192,11 @@ int sched_idle(void)
 	return 1;
 }
 
-void sched_reset(void)
+/* Firmware boot: the ready list carries over from before a power cycle. */
+void sched_init(void)
 {
-	nready = 0;
-	spm.hwrt = 0;
-	for (u32 dm = 0; dm < DM_COUNT; dm++)
-		running[dm].ctx = 0;
+	if (!epoch)
+		epoch = 1;		/* first boot after loading */
 }
 
 /* -- UFOs ------------------------------------------------------------------------ */
@@ -395,11 +475,6 @@ static int process(u32 ctx)
 	return progress;
 }
 
-static u32 ctx_dm(u32 ctx)
-{
-	return FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
-}
-
 /* The fence command @ctx stopped at names a UFO signalled just now. */
 static int ctx_woken(u32 ctx)
 {
@@ -427,26 +502,12 @@ static int ctx_woken(u32 ctx)
  */
 static int run_dm(u32 dm)
 {
-	u32 list[MAX_READY], n = 0;
 	int progress = 0;
 
-
-	for (u32 i = 0; i < nready; i++) {
-		u32 c = ready[i], p = FW32(c + OFF_FWCOMMONCONTEXT_PRIORITY), k = n++;
-
-		if (ctx_dm(c) != dm) {
-			n--;
-			continue;
-		}
-		/* stable insertion by descending priority */
-		while (k && FW32(list[k - 1] + OFF_FWCOMMONCONTEXT_PRIORITY) < p) {
-			list[k] = list[k - 1];
-			k--;
-		}
-		list[k] = c;
+	for (u32 c = ready_pass(dm, 1), next; c; c = next) {
+		next = PASS_NEXT(c);
+		progress |= process(c);
 	}
-	for (u32 i = 0; i < n; i++)
-		progress |= process(list[i]);
 	return progress;
 }
 
@@ -652,14 +713,23 @@ void sched_irq(void)
 
 	if ((ev & EVENT_PM_OUT_OF_MEMORY) && running[DM_GEOM].ctx)
 		oom_geom(&running[DM_GEOM]);
+	else if (ev & EVENT_PM_OUT_OF_MEMORY)
+		reg_write(CR_EVENT_CLEAR, EVENT_PM_OUT_OF_MEMORY);	/* spurious */
 
 	for (u32 i = 0; i < sizeof(dm_events) / sizeof(dm_events[0]); i++) {
 		u32 dm = dm_events[i].dm;
 		struct job *j = &running[dm];
 		u32 partner;
 
-		if (!(ev & dm_events[i].event) || !j->ctx)
+		if (!(ev & dm_events[i].event))
 			continue;
+		if (!j->ctx) {
+			/* no job on this data master (spurious, or one a hardware
+			 * recovery skipped): clear it, or the interrupt task
+			 * would be started again and again */
+			reg_write(CR_EVENT_CLEAR, dm_events[i].event);
+			continue;
+		}
 		/* the other half of a render context waits on this one */
 		partner = j->type == CCB_GEOM ? j->ctx + OFF_FWRENDERCONTEXT_FRAG_CONTEXT :
 			  (j->type == CCB_FRAG || j->type == CCB_FRAG_PR) && !j->pr ?
@@ -691,14 +761,11 @@ void sched_irq(void)
 			process(partner);
 		/* after a 3D pipe job: geometry waiting on the fences it signalled */
 		if (dm == DM_FRAG && nsignalled) {
-			u32 list[MAX_READY], n = nready;
-
-			for (u32 k = 0; k < n; k++)
-				list[k] = ready[k];
-			for (u32 k = 0; k < n; k++)
-				if (list[k] != partner && ctx_dm(list[k]) == DM_GEOM &&
-				    ctx_is_ready(list[k]) && ctx_woken(list[k]))
-					process(list[k]);
+			for (u32 c = ready_pass(DM_GEOM, 0), next; c; c = next) {
+				next = PASS_NEXT(c);
+				if (c != partner && ctx_is_ready(c) && ctx_woken(c))
+					process(c);
+			}
 		}
 	}
 	if (frag_done && !running[DM_FRAG].ctx)
@@ -736,6 +803,7 @@ u32 sched_cleanup(u32 type, u32 addr)
 		for (dm = 0; dm < DM_COUNT; dm++)
 			if (running[dm].ctx && running[dm].hwrt == addr)
 				return KCCB_RTN_CMD_EXECUTED | KCCB_RTN_CLEANUP_BUSY;
+		pm_forget_hwrt(addr);
 		break;
 	case CLEANUP_FREELIST:
 		for (dm = 0; dm < DM_COUNT; dm++) {
@@ -747,7 +815,11 @@ u32 sched_cleanup(u32 type, u32 addr)
 				return KCCB_RTN_CMD_EXECUTED | KCCB_RTN_CLEANUP_BUSY;
 		}
 		pm_unload_freelists(addr);
-		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+		/* 0x1348 only once the GPU units run (as the reference) */
+		if (gpu_units_on)
+			gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+		else
+			gpu_slc_mmu_flush_nofence(BIF_CTRL_INVAL_PC);
 		break;
 	}
 	/* the kernel frees the object next: drop any stale TLB entries */

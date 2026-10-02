@@ -247,8 +247,9 @@ static struct {
 	u64 pc;
 	u32 refs;
 	u32 used;
+	u32 stamp;		/* when it was last activated (LRU) */
 } pcset[PC_SETS] __attribute__((section(".persist")));
-static u32 pcset_next __attribute__((section(".persist")));
+static u32 pcset_clock __attribute__((section(".persist")));
 
 static const u8 cat_index_shift[DM_COUNT] = {
 	[DM_GEOM] = 0, [DM_FRAG] = 8, [DM_CDM] = 16,
@@ -284,12 +285,7 @@ u32 memctx_activate(u32 memctx, u32 dm)
 	} else {
 		u32 i, n = PC_SETS;
 
-		/* the set the context had (before a power cycle, say) if it is
-		 * free, else a free set, preferring one never used, then
-		 * round-robin */
-		if (set < PC_SETS && (!pcset[set].used || pcset[set].pc == pc) &&
-		    !pcset[set].refs)
-			n = set;
+		/* a free set: one never used, else the least recently used */
 		for (i = 0; n == PC_SETS && i < PC_SETS; i++) {
 			if (!pcset[i].used) {
 				n = i;
@@ -297,15 +293,16 @@ u32 memctx_activate(u32 memctx, u32 dm)
 			}
 		}
 		for (i = 0; n == PC_SETS && i < PC_SETS; i++) {
-			u32 c = (pcset_next + i) % PC_SETS;
-
-			if (!pcset[c].refs)
-				n = c;
+			if (pcset[i].refs)
+				continue;
+			for (u32 k = i + 1; k < PC_SETS; k++)
+				if (!pcset[k].refs && (s32)(pcset[k].stamp - pcset[i].stamp) < 0)
+					i = k;
+			n = i;
 		}
 		if (n == PC_SETS)
 			return ROGUE_FW_BIF_INVALID_PCSET;	/* all busy: caller retries */
 		set = n;
-		pcset_next = (set + 1) % PC_SETS;
 		gpu_slc_mmu_flush(0xC);
 		reg_write64(CR_BIF_CAT_BASE0 + 8 * (set + 1), pc);
 		pcset[set].pc = pc;
@@ -313,6 +310,7 @@ u32 memctx_activate(u32 memctx, u32 dm)
 		FW32(memctx + OFF_FWMEMCONTEXT_PAGE_CAT_BASE_REG_SET) = set;
 	}
 	pcset[set].refs++;
+	pcset[set].stamp = ++pcset_clock;
 	/* the set indices all live in the low word */
 	idx = reg_read64(CR_BIF_CAT_BASE_INDEX);
 	lo = (u32)idx & ~(7u << cat_index_shift[dm]);
@@ -331,9 +329,9 @@ void memctx_deactivate(u32 memctx, u32 dm)
 }
 
 /* Forget page-catalogue sets (after a GPU reset or power-off). */
-void memctx_reset(void)
+/* Firmware boot: no job holds a set (the table itself is kept). */
+void memctx_boot(void)
 {
 	for (u32 i = 0; i < PC_SETS; i++)
-		pcset[i].used = pcset[i].refs = 0;
-	pcset_next = 0;
+		pcset[i].refs = 0;
 }

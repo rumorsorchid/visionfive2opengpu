@@ -167,7 +167,7 @@ void gpu_slc_mmu_flush_nofence(u32 bif_flags);
 void gpu_dm_fence(u32 dm);
 u32 memctx_activate(u32 memctx, u32 dm);
 void memctx_deactivate(u32 memctx, u32 dm);
-void memctx_reset(void);
+void memctx_boot(void);
 
 /* -- sched.c ---------------------------------------------------------------- */
 void sched_kick(u32 kick);
@@ -178,7 +178,7 @@ int sched_idle(void);
 int sched_dm_busy(u32 dm);
 u32 sched_running_hwrt(u32 dm);
 struct job *sched_running_job(u32 dm);
-void sched_reset(void);
+void sched_init(void);
 void sched_skip(u32 dm);
 
 struct job {
@@ -205,6 +205,7 @@ void finish_geom(struct job *j);
 void finish_frag(struct job *j);
 int frag_pr_needed(struct job *j);
 void pm_reset(void);
+void pm_forget_hwrt(u32 h);
 void pm_unload_freelists(u32 fl);
 void pm_save(void);
 void oom_geom(struct job *j);

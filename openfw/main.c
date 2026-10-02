@@ -128,8 +128,15 @@ void fwccb_post(u32 type, const u32 *data, u32 n)
 	u32 wrap = FW32(ctl + OFF_CCB_CTL_WRAP_MASK);
 	u32 cmd = g.fwccb + wo * SIZEOF_FWCCB_CMD;
 
-	if (((wo + 1) & wrap) == FW32(ctl + OFF_CCB_CTL_READ_OFFSET))
-		return;				/* full: the kernel is not reading */
+	/*
+	 * Full: wait for the kernel's interrupt thread to read (it was
+	 * interrupted for every pending command), as the reference firmware
+	 * does. Dropping a command is not an option: a lost FREELIST_GROW or
+	 * FREELISTS_RECONSTRUCTION would stall that render for good. If the
+	 * kernel stopped reading altogether, its watchdog resets the firmware.
+	 */
+	while (((wo + 1) & wrap) == FW32(ctl + OFF_CCB_CTL_READ_OFFSET))
+		;
 	for (u32 i = 0; i < SIZEOF_FWCCB_CMD; i += 4)
 		FW32(cmd + i) = 0;
 	FW32(cmd + OFF_FWCCB_CMD_CMD_TYPE) = type;
@@ -513,6 +520,8 @@ void __attribute__((noreturn)) fw_main(void)
 	g.tracebuf_ctl = FW32(sysinit + OFF_SYSINIT_TRACE_BUF_CTL_FW_ADDR);
 	g.hwrinfobuf = FW32(osinit + OFF_OSINIT_ROGUE_FWIF_HWR_INFO_BUF_CTL_FW_ADDR);
 	g.dusts = 1;
+	memctx_boot();
+	sched_init();
 	hwr_init();
 
 	gpu_init();

@@ -27,7 +27,7 @@ rest on a real board.
 | Rascal/dust power-up | firmware-derived host sequence; vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
 | Mesa | 26.1+ supports BXE-4-32, non-conformant (`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`) | [board/cts.md](board/cts.md) |
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
-| Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth and partial renders, hardware recovery, suspend/resume); matches Imagination's firmware register for register in 68 emulated cases, 638 field sweeps and 160 random desktop-like workloads; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
+| Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth and partial renders, hardware recovery, suspend/resume); matches Imagination's firmware register for register in 82 emulated cases, 638 field sweeps and 160 random desktop-like workloads, with no use of freed memory; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
 | Boot / handoff | U-Boot HDMI framebuffer handed to Linux via EFI GOP and reserved memory; Debian sid checklist | [docs/boot.md](docs/boot.md) |
 | OpenBSD | roadmap + first patch (uncached DRAM alias) | [docs/openbsd.md](docs/openbsd.md) |
 

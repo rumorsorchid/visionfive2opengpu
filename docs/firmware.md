@@ -113,7 +113,7 @@ Imagination's firmware can be traced to the field it came from;
 `vary.py` changes one input at a time and `sweep.py` sets fields to
 patterns, which separates values the firmware computes from values it
 copies. openfw implements the result and `openfw/test_jobs.py` compares
-the two firmwares step by step (68 cases, 638 field values and 160
+the two firmwares step by step (82 cases, 638 field values and 160
 randomised desktop-like workloads, all identical).
 
 **Client CCB.** `KICK` carries the new write offset; the firmware moves
@@ -137,8 +137,12 @@ background task the firmware queues itself (`MTS_SCHEDULE = 0`).
 `0x6300 = 1` when the 3D pipe goes idle. Idle is "no job running",
 reported in two steps: a power-off query queues an interrupt task, which
 confirms IDLE with a host interrupt unless a job started meanwhile.
-Page catalogue register sets survive GPU power cycles; a context gets its
-old set back.
+The firmware's table of page catalogue register sets survives GPU power
+cycles (the registers do not); a context whose set no longer holds its
+catalogue gets a set never used, else the least recently used free one.
+Ready contexts that are still blocked on a fence are tried after the
+runnable ones, in the order they started waiting. A full firmware CCB is
+waited on, never skipped.
 
 **Per job.** Units init before the first job after boot (soft-reset
 release, SLC bypass, PDS/USC execution bases, pipeline defaults); cancel

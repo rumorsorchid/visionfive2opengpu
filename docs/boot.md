@@ -118,6 +118,38 @@ and power domain on, so use it only to debug.
    buffers. Raise it with `cma=` on the command line for several 4K
    buffers.
 
+## What to expect: games, emulators, local LLMs
+
+The firmware does not decide what the GPU can do: openfw and
+Imagination's firmware run the same jobs the same way. What applications
+see is Mesa's Vulkan driver. Mesa 26.2.3 on the BXE-4-32
+(`src/imagination/vulkan/pvr_physical_device.c`):
+
+| | |
+|---|---|
+| Vulkan | 1.2, not conformance tested yet |
+| Present | compute, MSAA, ETC2 textures, anisotropic filtering, multi-draw indirect, timeline semaphores, dynamic rendering, subgroup size control, integer dot product, clip/cull distances |
+| Missing | geometry and tessellation shaders; 16- and 8-bit types and storage (`shaderFloat16`, `shaderInt16`, `shaderInt8`, `storageBuffer16BitAccess`); BC (DXT) textures; dual-source blending; depth clamp; wireframe (`fillModeNonSolid`); stores and atomics in vertex and fragment shaders; descriptor indexing; buffer device address |
+| OpenGL (Zink) | OpenGL ES 2/3 applications; desktop OpenGL stops below 3.2, which needs geometry shaders, so "OpenGL 3.3 core" applications will not start |
+
+**Game emulation.** Emulators with a Vulkan or GLES renderer that does not
+need the missing features are the ones to try (RetroArch with its Vulkan
+or GLES drivers, PPSSPP). On this board the CPU (four U74 cores without a
+vector unit) is usually the limit before the GPU: emulators without a
+RISC-V JIT run their CPU core interpreted. Renderer options that need
+dual-source blending, geometry shaders or fragment-shader stores
+("accurate blending" and the like) fall back or are unavailable.
+
+**Local LLMs.** llama.cpp's Vulkan backend refuses this GPU: it requires
+16-bit storage buffers (`ggml-vulkan.cpp`: "does not support 16-bit
+storage"), which Mesa does not expose here. That is Mesa work, not
+firmware work. Until then, llama.cpp runs on the CPU (scalar RV64GC, so
+small quantised models only). Frameworks that can stay in 32-bit floats
+(ncnn, for example) have a better chance of using the GPU for compute.
+For long compute work the firmware side is ready: a single job may run up
+to the kernel's 30-second deadline, and the lockup detection only resets
+work that shows no progress at all.
+
 ## When something goes wrong
 
 * **No picture in U-Boot:** stop autoboot and run `hdmitest` (driver

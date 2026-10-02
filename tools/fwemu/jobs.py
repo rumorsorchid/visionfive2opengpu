@@ -38,6 +38,8 @@ import os
 import sys
 from contextlib import redirect_stdout
 
+from unicorn import UC_HOOK_MEM_READ
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
@@ -82,8 +84,13 @@ class Runner:
         args = argparse.Namespace(config_flags=0, trace_mask=0x80007FFF, max_insns=max_insns,
                                   trace_regs=trace_regs, trace_exc=False, complete_polls=True,
                                   kccb=[], watch=None)
+        if self.p["core_clock"]:
+            os.environ["FWEMU_CORE_CLOCK"] = str(self.p["core_clock"])
+        else:
+            os.environ.pop("FWEMU_CORE_CLOCK", None)
         fw = Firmware(fw_path, Tables(kernel))
         self.quiet = quiet
+        self.dead_writes = []
         with self.out():
             self.emu = fwemu.Emu(fw, fwemu.Layout(os.path.join(HERE, "layout.json")),
                                  load_cr_names(kernel), args)
@@ -103,7 +110,7 @@ class Runner:
         self.ta_stalled = False
         self.ta_hold = False     # scenario keeps the TA running
         self.hang = set(self.p["hang"])  # data masters whose work never finishes
-        self.time_offset = 0     # added to the GPU timer (scenario time jumps)
+        self.time_offset = self.p["time_base"]   # added to the GPU timer
         self.reg_values = {}     # register reads overridden by the scenario
         orig_read = self.emu.reg_model_read
 
@@ -279,10 +286,65 @@ class Runner:
                           ("cmd_data.pow_data.power_req_data.forced", 1)])
         self.kccb_bg()
         self.settle("power off request")
+        # The GPU power domain goes down: every register is back at its
+        # reset value when the kernel powers it up again.
+        e.regs = dict(fwemu.RESET_VALUES)
+        e.event_status = 0
         e.set("rogue_fwif_sysinit", fwemu.SYSINIT_VA, "firmware_started", 0)
         with self.out():
             e.boot()
         self.mark("resume (firmware restarted)")
+
+    def cleanup(self, kind, addr, label):
+        """The kernel's cleanup of a firmware object. When the firmware
+        does not report it busy the kernel frees the object: from then on
+        any firmware write to it (or, for a context, to its client CCB
+        control) is recorded in dead_writes, a use-after-free on hardware."""
+        e = self.emu
+        slot = self.host.cleanup(kind, addr)
+        self.kccb_bg()
+        self.settle(label)
+        rtn = e.r32(e.kccb_rtn + 4 * slot)
+        if not rtn & 2:                                   # KCCB_RTN_SLOT_CLEANUP_BUSY
+            L = self.host.L
+            if kind == H.CLEANUP_HWRTDATA:
+                regions = [(addr, L.size("rogue_fwif_hwrtdata"))]
+            elif kind == H.CLEANUP_FREELIST:
+                regions = [(addr, L.size("rogue_fwif_freelist"))]
+            else:
+                regions = [(addr, L.size("rogue_fwif_fwcommoncontext")),
+                           (e.r32(addr), L.size("rogue_fwif_cccb_ctl"))]   # ccbctl_fw_addr
+            for lo, size in regions:
+                e.uc.hook_add(fwemu.UC_HOOK_MEM_WRITE, self._dead_write, begin=lo,
+                              end=lo + size - 1)
+        return rtn, slot
+
+    def kernel_reads_fwccb(self, latency=64):
+        """Model the kernel's interrupt thread, which empties the firmware
+        CCB concurrently with the firmware: once the firmware has looked
+        at the full CCB's read offset @latency times, the kernel reads all
+        pending commands (kept in self.fwccb_async)."""
+        e, h = self.emu, self.host
+        off, _ = h.L.field("rogue_fwif_ccb_ctl", "read_offset")
+        addr = e.fwccb_ctl + off
+        self.fwccb_async = []
+        polls = [0]
+
+        def on_read(uc, access, a, size, value, _):
+            ro = h.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "read_offset")
+            wo = h.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "write_offset")
+            wrap = h.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "wrap_mask")
+            if (wo + 1) & wrap != ro:
+                return
+            polls[0] += 1
+            if polls[0] >= latency:
+                polls[0] = 0
+                self.fwccb_async += h.fwccb_process()
+        e.uc.hook_add(UC_HOOK_MEM_READ, on_read, begin=addr, end=addr + 3)
+
+    def _dead_write(self, uc, access, addr, size, value, _):
+        self.dead_writes.append((self.steps[-1]["step"] if self.steps else "", addr,
+                                 uc.reg_read(fwemu.UC_MIPS_REG_PC)))
 
     def kccb_bg(self):
         self.emu.pending_tasks.append("bg")
@@ -364,6 +426,8 @@ DEFAULT_PARAMS = {
     "callstack": 0xE300000000,
     "geom": {}, "rt": None,
     "status_tags": 0,
+    "time_base": 0,                  # GPU timer at power-up (long-uptime tests)
+    "core_clock": 0,                 # GPU core clock in Hz (0: FWEMU_CORE_CLOCK or default)
     "override": {},                  # {struct name: {field path: value}}
     "reg_init": {},                  # {register offset: power-on value}
     "oom": 0,                        # PM out-of-memory events raised during TAs
@@ -485,10 +549,8 @@ def sc_render(r, with_frag=True):
 def sc_cleanup(r):
     res = sc_compute(r)
     h = r.host
-    slot = h.cleanup(H.CLEANUP_FWCOMMONCONTEXT, r.ctx.fw_addr(r.ctx.queues["compute"]))
-    r.kccb_bg()
-    r.settle("context cleanup")
-    res["cleanup_rtn"] = r.emu.r32(r.emu.kccb_rtn + 4 * slot)
+    res["cleanup_rtn"], _ = r.cleanup(H.CLEANUP_FWCOMMONCONTEXT,
+                                      r.ctx.fw_addr(r.ctx.queues["compute"]), "context cleanup")
     return res
 
 
@@ -621,6 +683,71 @@ def sc_blocked(r):
     return {"done": [ja.done(), jb.done()], "a": qa.ufo_value(), "b": qb.ufo_value()}
 
 
+def sc_many_clients(r, n=40, renders=4):
+    """Many applications at once, all waiting on one fence: n compute
+    contexts in two VMs and a few render contexts block on a job that is
+    submitted last, then all become runnable together (more contexts
+    than any fixed-size table in the firmware should hold)."""
+    h = r.host
+    vms = [h.vm_context(r.p["pc"] + 0x100000 * i) for i in range(2)]
+    gate = h.compute_context(vms[0])
+    gq = gate.queues["compute"]
+    watch_queue(r, gq, "gate")
+    r.mark("setup")
+    jobs_ = []
+    dep = [(gq.ufo, gq.seqno + 1)]
+    for i in range(n):
+        c = h.compute_context(vms[i % 2], priority=i % 3)
+        q = c.queues["compute"]
+        watch_queue(r, q, "c%d" % i)
+        j = compute_job(r, c, deps=dep, base=0x10 * (i % 8))
+        h.submit(j)
+        r.kccb_bg()
+        jobs_.append(j)
+    for i in range(renders):
+        ctx, fl, gfl, (rt,) = new_render(r, vms[i % 2])
+        watch_queue(r, ctx.queues["geometry"], "r%d.geom" % i)
+        watch_queue(r, ctx.queues["fragment"], "r%d.frag" % i)
+        geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0x200 * i, dep)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        h.submit(frag)
+        r.kccb_bg()
+        jobs_ += [geom, frag]
+    # Imagination's firmware handles a few contexts per MTS task and
+    # queues another task for the rest: allow it as many as it needs
+    r.settle("%d clients blocked" % (n + renders), rounds=2000)
+    g = compute_job(r, gate)
+    h.submit(g)
+    r.kccb_bg()
+    r.settle("gate opens, everything runs", rounds=2000)
+    r.settle("drain", rounds=2000)
+    return {"done": [j.done() for j in jobs_ + [g]]}
+
+
+def sc_blocked_power(r):
+    """A context waiting on a fence when the GPU powers down (not something
+    the upstream kernel produces: the job it waits for is always runnable
+    first); the fence's job arrives after the restart."""
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    a, b = h.compute_context(vm), h.compute_context(vm)
+    qa, qb = a.queues["compute"], b.queues["compute"]
+    watch_queue(r, qa, "computeA")
+    watch_queue(r, qb, "computeB")
+    r.mark("setup")
+    jb = compute_job(r, b, deps=[(qa.ufo, qa.seqno + 1)], base=0x20)
+    h.submit(jb)
+    r.kccb_bg()
+    r.settle("B blocked")
+    r.power_cycle()
+    ja = compute_job(r, a, base=0x10)
+    h.submit(ja)
+    r.kccb_bg()
+    r.settle("A runs, then B")
+    return {"done": [ja.done(), jb.done()], "a": qa.ufo_value(), "b": qb.ufo_value()}
+
+
 def sc_wrap(r, n=200):
     """Enough compute jobs to wrap the 32 KiB client CCB (PADDING)."""
     h = r.host
@@ -659,10 +786,8 @@ def sc_cleanup_busy(r):
     r.settle("cleanup while busy", complete=False)
     rtn1 = r.emu.r32(r.emu.kccb_rtn + 4 * s1)
     r.settle("job completes")
-    s2 = h.cleanup(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(q))
-    r.kccb_bg()
-    r.settle("cleanup when idle")
-    return {"done": j.done(), "busy_rtn": rtn1, "idle_rtn": r.emu.r32(r.emu.kccb_rtn + 4 * s2)}
+    rtn2, _ = r.cleanup(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(q), "cleanup when idle")
+    return {"done": j.done(), "busy_rtn": rtn1, "idle_rtn": rtn2}
 
 
 def sc_teardown(r):
@@ -683,10 +808,55 @@ def sc_teardown(r):
                        (H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["fragment"])),
                        (H.CLEANUP_HWRTDATA, rt.data[0]), (H.CLEANUP_HWRTDATA, rt.data[1]),
                        (H.CLEANUP_FREELIST, fl.fw), (H.CLEANUP_FREELIST, gfl.fw)):
-        slots.append(h.cleanup(kind, addr))
-        r.kccb_bg()
-        r.settle("cleanup %d" % kind)
+        slots.append(r.cleanup(kind, addr, "cleanup %d" % kind)[1])
     return {"done": frag.done(), "rtn": [r.emu.r32(r.emu.kccb_rtn + 4 * s) for s in slots]}
+
+
+def sc_teardown_power(r, frames=1, again=True):
+    """An application quits (or recreates its swapchain) after drawing:
+    the kernel destroys its contexts, HWRT data and free lists, the GPU
+    powers down, then another application renders. The destroyed objects
+    stay watched: the firmware must not write to them after their cleanup."""
+    h = r.host
+    ctx, fl, gfl, rts = new_render(r, data_sets=2)
+    for k, rt in enumerate(rts):
+        r.watch_obj("old.hwrt%d" % k, rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("old.fl", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("old.gfl", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 32)
+    r.mark("setup")
+    done = []
+    for f in range(frames):
+        geom, pr, frag = render_jobs(r, ctx, rts[f % 2].data[0], 0x200 * f)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("frame %d geometry" % f)
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("frame %d fragment" % f)
+        done += [geom, frag]
+    slots = []
+    for kind, addr in ((H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["geometry"])),
+                       (H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["fragment"])),
+                       *((H.CLEANUP_HWRTDATA, rt.data[0]) for rt in rts),
+                       *((H.CLEANUP_HWRTDATA, rt.data[1]) for rt in rts),
+                       (H.CLEANUP_FREELIST, fl.fw), (H.CLEANUP_FREELIST, gfl.fw)):
+        slots.append(r.cleanup(kind, addr, "cleanup %d" % kind)[1])
+    r.power_cycle()
+    if again:
+        ctx2, fl2, gfl2, (rt2,) = new_render(r)
+        r.watch_obj("new.hwrt", rt2.data[0], h.L.size("rogue_fwif_hwrtdata"))
+        geom, pr, frag = render_jobs(r, ctx2, rt2.data[0], 0)
+        h.submit_combined(geom, pr)
+        r.kccb_bg()
+        r.settle("new application geometry")
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("new application fragment")
+        done += [geom, frag]
+        r.power_cycle()
+    return {"done": [j.done() for j in done],
+            "rtn": [r.emu.r32(r.emu.kccb_rtn + 4 * s) for s in slots]}
 
 
 def sc_mixed(r):
@@ -1183,6 +1353,51 @@ def sc_oom_wait(r, ticks=12, pr_ticks=0):
             "fwccb": [(hex(t), sorted(i.items())) for t, i in cmds]}
 
 
+def sc_fwccb_full(r, ticks=6):
+    """The kernel is slow to read the firmware CCB: it is full (31 stats
+    updates) when the TA runs out of memory and a free list grow has to be
+    requested. The kernel catches up later; the grow must still arrive."""
+    h, e = r.host, r.emu
+    C = "rogue_fwif_fwccb_cmd"
+    size = h.L.size(C)
+    ctx, fl, gfl, (rt,) = new_render(r)
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("gfreelist", gfl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("fwccb_ctl", e.fwccb_ctl, 16)
+    r.mark("setup")
+    ro = h.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "read_offset")
+    wrap = h.get("rogue_fwif_ccb_ctl", e.fwccb_ctl, "wrap_mask")
+    for i in range(wrap):                     # leave one slot: full
+        cmd = e.fwccb + ((ro + i) & wrap) * size
+        for o in range(0, size, 4):
+            e.w32(cmd + o, 0)
+        h.set(C, cmd, "cmd_type", H.FWCCB_UPDATE_STATS)
+    h.set("rogue_fwif_ccb_ctl", e.fwccb_ctl, "write_offset", (ro + wrap) & wrap)
+    r.kernel_reads_fwccb()
+    geom, pr, frag = render_jobs(r, ctx, rt.data[0], 0)
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry, out of memory, firmware CCB full")
+    for i in range(ticks):
+        r.tick("waiting %d" % i)
+    cmds = r.fwccb_async + h.fwccb_process()  # the kernel catches up
+    r.fwccb_async = []
+    r.kccb_bg()
+    r.settle("kernel read the firmware CCB")
+    for i in range(ticks):
+        r.tick("later %d" % i)
+    cmds += r.fwccb_async + h.fwccb_process()
+    r.kccb_bg()
+    r.settle("grow answered")
+    h.submit(frag)
+    r.kccb_bg()
+    r.settle("fragment")
+    return {"done": [geom.done(), pr.done(), frag.done()],
+            "fwccb": [hex(t) for t, i in cmds if t != H.FWCCB_UPDATE_STATS]}
+
+
 def sc_oom_wait_hang(r, wait=3, ticks=12):
     """Geometry waits `wait` ticks for a free list grow, resumes when it
     arrives and then never finishes."""
@@ -1216,7 +1431,10 @@ def sc_stress(r, seed, ops=40):
     a compositor-like render context drawing frames on two HWRT data sets,
     applications' compute and transfer work in one or two VMs, priorities,
     cross-queue fences, completions in any order, memory pressure, timer
-    ticks with progress, suspend/resume when idle, and teardown."""
+    ticks with progress, suspend/resume when idle, swapchains recreated
+    (new HWRT data) and applications quitting while another starts (all
+    their firmware objects cleaned up; any later firmware write to them
+    is caught, see Runner.cleanup)."""
     import random
     rnd = random.Random(seed)
     h, p = r.host, r.p
@@ -1258,10 +1476,62 @@ def sc_stress(r, seed, ops=40):
             r.kccb_bg()
             r.settle(label + " (host answers)", complete=complete)
 
+    gen = [0]
+
+    def cleanup_ok(kind, addr, label):
+        for _ in range(3):
+            rtn, _ = r.cleanup(kind, addr, label)
+            if not rtn & 2:                       # not busy: freed
+                return
+            pump(label + " (busy, drain)", True)
+
+    def watch_render(i, rd):
+        gen[0] += 1
+        tag = "r%d.%d" % (i, gen[0])
+        watch_queue(r, rd["ctx"].queues["geometry"], tag + ".geom")
+        watch_queue(r, rd["ctx"].queues["fragment"], tag + ".frag")
+        for k, rt in enumerate(rd["rts"]):
+            r.watch_obj("%s.hwrt%d" % (tag, k), rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+
     for step in range(ops):
         op = rnd.choice(("compute", "compute", "transfer", "frame", "frame", "frame",
-                         "complete", "complete", "settle", "tick", "oom", "power"))
+                         "complete", "complete", "settle", "tick", "oom", "power",
+                         "resize", "exit"))
         label = "%d %s" % (step, op)
+        if op == "resize":
+            # the application recreates its swapchain: new HWRT data sets
+            i = rnd.randrange(len(renders))
+            rd = renders[i]
+            pump(label + " (drain)", True)
+            for rt in rd["rts"]:
+                for d in rt.data:
+                    cleanup_ok(H.CLEANUP_HWRTDATA, d, label + " cleanup hwrt")
+            fl, gfl = rd["fls"]
+            rd["rts"] = [h.hwrt([fl, gfl], width=p["width"], height=p["height"],
+                                samples=p["samples"], geom=p["geom"], rt=p["rt"])
+                         for _ in range(2)]
+            rd["frame"] = 0
+            watch_render(i, rd)
+            continue
+        if op == "exit":
+            # the application quits and another one starts drawing
+            i = rnd.randrange(len(renders))
+            rd = renders[i]
+            pump(label + " (drain)", True)
+            ctx = rd["ctx"]
+            cleanup_ok(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["geometry"]),
+                       label + " cleanup geom")
+            cleanup_ok(H.CLEANUP_FWCOMMONCONTEXT, ctx.fw_addr(ctx.queues["fragment"]),
+                       label + " cleanup frag")
+            for rt in rd["rts"]:
+                for d in rt.data:
+                    cleanup_ok(H.CLEANUP_HWRTDATA, d, label + " cleanup hwrt")
+            for fl in rd["fls"]:
+                cleanup_ok(H.CLEANUP_FREELIST, fl.fw, label + " cleanup free list")
+            ctx, fl, gfl, rts = new_render(r, rnd.choice(vms), data_sets=2)
+            renders[i] = rd = {"ctx": ctx, "rts": rts, "frame": 0, "fls": (fl, gfl)}
+            watch_render(i, rd)
+            continue
         if op == "compute" or (op == "transfer" and not xfer):
             c = rnd.choice(comp)
             j = compute_job(r, c, deps(), base=0x10 * (n % 8))
@@ -1456,6 +1726,13 @@ SCENARIOS = {
     "hang-ta-compute-ok": sc_hang_ta_compute_ok,
     "hang-two-progress": lambda r: sc_hang_two(r, ticks=30, ta_progress=20),
     "hang-3d": lambda r: sc_hang_render(r, "3D"),
+    "teardown-power": sc_teardown_power,
+    "many-clients": sc_many_clients,
+    "fwccb-full": sc_fwccb_full,
+    "blocked-power": sc_blocked_power,
+    **{"many-clients-%d" % n: (lambda n: lambda r: sc_many_clients(r, n=n, renders=0))(n)
+       for n in (8, 16, 24, 28, 30, 31, 32, 33, 40)},
+    "teardown-power-frames": lambda r: sc_teardown_power(r, frames=3),
 }
 
 

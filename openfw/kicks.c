@@ -333,6 +333,18 @@ static void pm_set_pb_base(void)
 	reg_write(0x02B0, v);
 }
 
+/*
+ * The kernel is about to free HWRT data @h: forget it, so that nothing
+ * is stored into it later (power-off, the next geometry kick).
+ */
+void pm_forget_hwrt(u32 h)
+{
+	if (pm_pending_hwrt == h)
+		pm_pending_hwrt = pm_pending_stored = 0;
+	if (pm_3d_hwrt == h)
+		pm_3d_hwrt = 0;
+}
+
 void pm_reset(void)
 {
 	for (u32 c = 0; c < 2; c++)
@@ -602,12 +614,19 @@ void kick_geom(struct job *j)
 	reg_write64(0x03D0, 0x100000100ull);
 	{
 		/* free lists to load while a render's 3D pass may free pages
-		 * on PM context 1: pause its deallocation around the loads */
-		int load = 0, pause;
+		 * on PM context 1: pause its deallocation around the loads when
+		 * they touch a list PM context 1 holds (the one leaving PM
+		 * context 0, or the one coming in) */
+		int shared = 0, pause;
 
-		for (u32 k = 0; k < 2; k++)
-			load |= hwrt_freelist(h, k) && pm_loaded_fl[0][k] != hwrt_freelist(h, k);
-		pause = load && sched_dm_busy(DM_FRAG) && sched_running_hwrt(DM_FRAG);
+		for (u32 k = 0; k < 2; k++) {
+			u32 fl = hwrt_freelist(h, k), out = pm_loaded_fl[0][k];
+
+			if (fl && out != fl)
+				shared |= (out && out == pm_loaded_fl[1][k]) ||
+					  fl == pm_loaded_fl[1][k];
+		}
+		pause = shared && sched_dm_busy(DM_FRAG) && sched_running_hwrt(DM_FRAG);
 		if (pause)
 			pm_pause(2, 1);
 		for (u32 k = 0; k < 2; k++) {

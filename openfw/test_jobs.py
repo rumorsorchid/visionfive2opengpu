@@ -103,6 +103,28 @@ CASES = [
                                    "oom_regs": {0xD20: 1}}),
     ("oom-wait-hang", "oom-wait-hang", {"oom": 1, "fl_threshold": 0}),
     ("partial-render-slow", "pr-slow", {"oom": 1, "fl_threshold": 0, "fl_max": 256}),
+    # applications quitting / swapchains recreated, then power-down: nothing
+    # may be written to the freed objects (jobs.Runner.cleanup)
+    ("teardown-power", "teardown-power", {}),
+    ("teardown-power-frames", "teardown-power-frames", {}),
+    # more clients waiting at once than any fixed table would hold
+    ("many-clients-40", "many-clients-40", {}),
+    ("many-clients", "many-clients", {}),
+    # long uptime: the GPU timer's low 32 bits wrap during the work
+    ("compute-wrap", "compute", {"time_base": 0xFFFFFF00}),
+    ("frames-wrap", "frames", {"time_base": 0xFFFFF000}),
+    ("hang-compute-wrap", "hang-compute", {"time_base": 0xFFF80000}),
+    ("hang-two-wrap", "hang-two", {"time_base": 0xFFF00000}),
+    ("overrun-wrap", "overrun", {"time_base": 0xFFF00000}),
+    # a context still waiting on a fence when the GPU powers down
+    ("blocked-power", "blocked-power", {}),
+    # the kernel is slow to read the firmware CCB: the grow request must not be lost
+    ("fwccb-full", "fwccb-full", {"oom": 1, "fl_threshold": 0}),
+    # other GPU clocks (the vendor rates): lockup checks and deadlines scale
+    ("hang-compute-396", "hang-compute", {"core_clock": 396000000}),
+    ("hang-two-594", "hang-two", {"core_clock": 594000000}),
+    ("overrun-594", "overrun", {"core_clock": 594000000}),
+    ("frames-594", "frames", {"core_clock": 594000000}),
 ]
 
 # Cases where openfw deliberately takes another route than the reference
@@ -219,6 +241,11 @@ def compare(name, a, b, verbose):
                     if wa != wb:
                         errors.append("  +0x%03x openfw %-10s reference %s" % (
                             off, wa[::-1].hex() or "-", wb[::-1].hex() or "-"))
+    # writes to objects the kernel has freed (jobs.Runner.cleanup)
+    for nm, run in (("openfw", runa), ("reference", runb)):
+        for step, addr, pc in run.dead_writes[:4]:
+            errors.append("%s writes freed object at 0x%08x in step '%s' (pc 0x%08x)" % (
+                nm, addr, step, pc))
     print("%-18s %s" % (name, "ok" if not errors else "FAIL"))
     for e in errors:
         print("    " + e)

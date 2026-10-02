@@ -134,7 +134,7 @@ Scenarios: `power`, `compute`, `compute2`, `transfer`, `render`, `geom`,
 `multivm`, `multivm-concurrent`, `blocked`, `wrap`, `mixed`, `priority`,
 `priority2`, `multikick`, `oom`, `oom-live`, `oom-frames`, `oom-wait`,
 `oom-wait-hang`, `pr-slow`, `suspend`, `hang-*`, `overrun`, `fault-*`,
-`stress<seed>`. Command fields are filled with tags (`0x5A0nn000`) so the
+`teardown-power*`, `many-clients*`, `fwccb-full`, `stress<seed>`. Command fields are filled with tags (`0x5A0nn000`) so the
 report names the field behind every register value.
 
 GPU memory: contexts get real page tables (`GpuVM`, the `pvr_mmu.c`
@@ -146,6 +146,24 @@ counts at `FWEMU_CORE_CLOCK / 256` (default 409.6 MHz), as the GPU's.
 The host answers `FREELISTS_RECONSTRUCTION` like
 `pvr_free_list_process_reconstruct_req` (free lists rebuilt, HWRT data
 marked `RTDATA_STATE_HWR`).
+
+Closer to the hardware and the kernel, for robustness checks:
+
+* **Power-down** resets every GPU register to its reset value before the
+  firmware restarts (`Runner.power_cycle`).
+* **Freed objects:** `Runner.cleanup` sends the kernel's `CLEANUP`; when
+  the firmware does not answer busy, the kernel frees the object, so a
+  write trap is armed on it (and on a context's CCB control). Writes
+  after that are reported as `dead_writes` and fail the case.
+* **A concurrent kernel:** `Runner.kernel_reads_fwccb` empties the
+  firmware CCB from a read hook once the firmware has polled a full CCB
+  for a while, like the kernel's interrupt thread.
+* **Time and clocks:** the `time_base` parameter starts the GPU timer
+  anywhere (near its 32-bit wrap, say); `core_clock` sets the GPU clock
+  the kernel reports to the firmware.
+* **Long task chains:** `settle(rounds=...)` allows as many MTS tasks per
+  step as a firmware needs (Imagination's handles a few contexts per
+  task).
 
 ## Next steps
 
