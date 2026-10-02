@@ -47,6 +47,64 @@ FIELDS = {
                                "pt_log2_page_size", "pt_num_pages"],
 }
 
+# Structures emitted in full: every scalar member, flattened, as
+# OFF_<STRUCT>_<PATH>; arrays of scalars longer than ARRAY_FLATTEN as their
+# base offset plus STRIDE_<STRUCT>_<PATH>.
+FULL = [
+    "rogue_fwif_fwcommoncontext", "rogue_fwif_cccb_ctl", "rogue_fwif_ccb_cmd_header",
+    "rogue_fwif_ufo", "rogue_fwif_cleanup_ctl", "rogue_fwif_fwmemcontext",
+    "rogue_fwif_kccb_cmd_kick_data", "rogue_fwif_cleanup_request", "rogue_fwif_freelist_gs_data",
+    "rogue_fwif_cmd_compute", "rogue_fwif_cmd_transfer", "rogue_fwif_cmd_geom",
+    "rogue_fwif_cmd_frag", "rogue_fwif_fwcomputecontext", "rogue_fwif_fwrendercontext",
+    "rogue_fwif_fwtransfercontext", "rogue_fwif_geom_ctx_state", "rogue_fwif_frag_ctx_state",
+    "rogue_fwif_hwrtdata", "rogue_fwif_hwrtdata_common", "rogue_fwif_freelist",
+    "rogue_fwif_fwccb_cmd", "rogue_fwif_fwccb_cmd_freelist_gs_data",
+    "rogue_fwif_fwccb_cmd_context_reset_data",
+]
+ARRAY_FLATTEN = 8
+EXTRA_FIELDS = {
+    "rogue_fwif_sysinit": ["pds_exec_base", "usc_exec_base"],
+    "rogue_fwif_kccb_cmd": ["cmd_data.cmd_kick_data", "cmd_data.combined_geom_frag_cmd_kick_data",
+                            "cmd_data.combined_geom_frag_cmd_kick_data.geom_cmd_kick_data",
+                            "cmd_data.combined_geom_frag_cmd_kick_data.frag_cmd_kick_data",
+                            "cmd_data.cleanup_data", "cmd_data.free_list_gs_data"],
+}
+
+
+def leaves(L, sname, prefix="", base=0):
+    """(path, offset, size, count, stride) for every scalar member."""
+    st = L.structs[sname] if sname in L.structs else L.anon[sname]
+    for m in st["members"]:
+        t = m["type"]
+        off = base + m["offset"]
+        name = prefix + m["name"]
+        if t["kind"] in ("struct", "union"):
+            sub = t.get("name") if t.get("name") in L.structs else str(t.get("die_offset"))
+            yield (name, off, t["size"], 0, 0)
+            yield from leaves(L, sub, name + ".", off)
+        elif t["kind"] == "array":
+            e = t["elem"]
+            n = t["size"] // e["size"]
+            if e["kind"] in ("struct", "union"):
+                sub = e.get("name") if e.get("name") in L.structs else str(e.get("die_offset"))
+                yield (name, off, t["size"], n, e["size"])
+                for i in range(n):
+                    yield from leaves(L, sub, "%s[%d]." % (name, i), off + i * e["size"])
+            elif n > ARRAY_FLATTEN:
+                yield (name, off, t["size"], n, e["size"])
+            else:
+                yield (name, off, t["size"], n, e["size"])
+                for i in range(n):
+                    yield ("%s[%d]" % (name, i), off + i * e["size"], e["size"], 0, 0)
+        else:
+            yield (name, off, t["size"], 0, 0)
+
+
+def cname(sname, path):
+    return (sname.replace("rogue_fwif_", "").replace("rogue_", "") + "_" +
+            path.replace(".", "_").replace("[", "").replace("]", "")).upper()
+
+
 # Trace formats openfw emits, by name. The firmware writes only the ID;
 # the kernel (pvr_fw_trace.c) and tools/fwemu/fwtrace.py hold the strings.
 # A (format, n) tuple picks the n-th ID when the same string is listed
@@ -70,6 +128,21 @@ TRACE = {
     "OPENFW_PAGE_FAULT": "Mips page fault detected (BadVAddr: 0x%08x, EntryLo0: 0x%08x, "
                          "EntryLo1: 0x%08x)",
     "OPENFW_DBG_HEX4": "0x%08x 0x%08x 0x%08x 0x%08x",
+    "OPENFW_KICK_CDM": "Kick Compute: FWCtx 0x%08.8x @ %d. (PID:%d, prio:%d, ext:0x%08x, int:0x%08x)",
+    "OPENFW_KICK_TQ": "Kick 3D TQ: FWCtx 0x%08.8x @ %d, CSW resume:%d. (PID:%d, prio:%d, "
+                      "frame:%d, ext:0x%08x, int:0x%08x)",
+    "OPENFW_KICK_TA": "Kick TA: FWCtx 0x%08.8x @ %d, RTD 0x%08x, First kick:%d, Last kick:%d, "
+                      "CSW resume:%d. (PID:%d, prio:%d, frame:%d, ext:0x%08x, int:0x%08x)",
+    "OPENFW_KICK_3D": "Kick 3D: FWCtx 0x%08.8x @ %d, RTD 0x%08x, Partial render:%d, CSW resume:%d. "
+                      "(PID:%d, prio:%d, frame:%d, ext:0x%08x, int:0x%08x)",
+    "OPENFW_CDM_DONE": "Compute finished",
+    "OPENFW_TA_DONE": "TA finished",
+    "OPENFW_3D_DONE": "3D finished, HWRTData0State=%x, HWRTData1State=%x",
+    "OPENFW_UFO_CHECK": "UFO PR-Check: [0x%08.8x] is 0x%08.8x requires >= 0x%08.8x",
+    "OPENFW_UFO_UPDATE": ("UFO Update: [0x%08.8x] = 0x%08.8x", 0),
+    "OPENFW_MEMCTX": "Activate MemCtx=0x%08x DM=%d secure=%d",
+    "OPENFW_FL_GROW": "Freelist grow completed [0x%08x]: added pages 0x%08x, total pages 0x%08x, "
+                      "new DevVirtAddr 0x%08x%08x",
 }
 
 
@@ -96,6 +169,24 @@ def main():
         for f in fields:
             off, _ = L.field(sname, f)
             out.append("#define %s %d" % (macro(sname, f), off))
+        out.append("")
+    for sname, paths in EXTRA_FIELDS.items():
+        for f in paths:
+            off, _ = L.field(sname, f)
+            out.append("#define %s %d" % (macro(sname, f), off))
+        out.append("")
+    for sname in FULL:
+        out.append("/* struct %s: %d bytes */" % (sname, L.size(sname)))
+        out.append("#define SIZEOF_%s %d" % (cname(sname, "")[:-1], L.size(sname)))
+        seen = set()
+        for path, off, size, n, stride in leaves(L, sname):
+            m = "OFF_" + cname(sname, path)
+            if m in seen:
+                continue
+            seen.add(m)
+            out.append("#define %s %d" % (m, off))
+            if n:
+                out.append("#define STRIDE_%s %d" % (cname(sname, path), stride))
         out.append("")
     for name, fmt in TRACE.items():
         nth = None

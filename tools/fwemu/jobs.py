@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""
+jobs.py - run GPU jobs through a firmware image in fwemu.
+
+Submits jobs the way the Linux powervr driver does (host.py) and plays the
+GPU: when the firmware writes a data master's start register, the matching
+completion event is raised in EVENT_STATUS and the MTS interrupt task is
+delivered, as the hardware would. Every register write, every firmware
+write to host-visible memory and the firmware trace are logged per step,
+with tagged command fields resolved to their names.
+
+    jobs.py FW.fw --kernel LINUX compute [transfer render fence ...]
+    jobs.py FW.fw --kernel LINUX render --json out.json
+
+Scenarios:
+  compute      one compute job (CDM)
+  compute2     two compute jobs, the second waiting on the first's fence
+  transfer     one transfer job (TQ on the fragment data master)
+  render       geometry + partial-render fragment (combined kick) + fragment
+  geom         geometry + partial-render fragment only
+  cleanup      compute job, then context cleanup
+"""
+import argparse
+import io
+import json
+import os
+import sys
+from contextlib import redirect_stdout
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import fwemu  # noqa: E402
+import fwtrace  # noqa: E402
+import host as H  # noqa: E402
+from fwregs import load_cr_names  # noqa: E402
+from pvrfw import Firmware, Tables  # noqa: E402
+
+# Start registers: (offset, value) written by the firmware to launch work
+# on a data master, and the EVENT_STATUS bits the hardware raises when that
+# work is done. Learnt from Imagination's firmware (docs/firmware.md).
+# Registers the hardware updates while work runs (parameter-manager stack
+# pointers, page counts, catalogue bases). With "status_tags", completing
+# work sets each to 0x7Exxxxxx (xxxxxx = offset) so the firmware's copies
+# of them into memory can be traced.
+STATUS_REGS = {
+    "TA": [0x2000, 0x20c8, 0x20d8, 0x20e0, 0x348, 0x3a0, 0x274, 0x270, 0x2c0,
+           0x1248, 0x124c, 0x1250, 0x1254, 0x1260, 0x1264, 0xd20, 0x20b8, 0x20bc,
+           0x210, 0x214],
+    "3D": [0x2008, 0x2088, 0x2098, 0x20a0, 0x350, 0x3a8, 0x284, 0x280, 0x2d0,
+           0x1268, 0x126c, 0x1270, 0x1274, 0x1280, 0x1284, 0x2078, 0x207c, 0x218, 0x21c],
+}
+
+KICKS = {
+    0x0478: ("CDM", 1 << 2),          # COMPUTE_FINISHED
+    0x0F00: ("3D", 1 << 3),           # PIXELBE_END_RENDER (fragment, transfer)
+    0x0400: ("TA", 1 << 5),           # TA_FINISHED
+}
+
+
+class Runner:
+    def __init__(self, fw_path, kernel, quiet=True, trace_regs=False, max_insns=3_000_000,
+                 params=None):
+        self.kernel = kernel
+        self.p = dict(DEFAULT_PARAMS)
+        self.p.update(params or {})
+        args = argparse.Namespace(config_flags=0, trace_mask=0x80007FFF, max_insns=max_insns,
+                                  trace_regs=trace_regs, trace_exc=False, complete_polls=True,
+                                  kccb=[], watch=None)
+        fw = Firmware(fw_path, Tables(kernel))
+        self.quiet = quiet
+        with self.out():
+            self.emu = fwemu.Emu(fw, fwemu.Layout(os.path.join(HERE, "layout.json")),
+                                 load_cr_names(kernel), args)
+        self.emu.sf_table = fwtrace.load_sf_table(kernel)
+        # power-on register values (e.g. read-modify-write targets)
+        for reg, v in self.p["reg_init"].items():
+            self.emu.regs[reg] = v
+        self.names = self.emu.names
+        self.tags = {}
+        self.steps = []
+        self.watch = {}
+        self.kicks = []
+        orig = self.emu.reg_model_write
+
+        def model_write(off, value):
+            orig(off, value)
+            o = off & ~0x200000
+            if o in KICKS and value & 1:
+                self.kicks.append(o)
+        self.emu.reg_model_write = model_write
+
+    def out(self):
+        return redirect_stdout(io.StringIO()) if self.quiet else _Null()
+
+    def boot(self):
+        with self.out():
+            started = self.emu.run()
+        self.host = H.Host(self.emu)
+        if self.p["shift"]:
+            # move every following FW object: exposes FW-address dependencies
+            self.emu.alloc("shift", self.p["shift"])
+        self.mark("boot")
+        return started
+
+    # -- bookkeeping -----------------------------------------------------------------
+    def tag_fields(self, sname, values):
+        for path, v in values.items():
+            if isinstance(v, int) and (v & 0xFF000000) == 0x5A000000:
+                self.tags[v & 0xFFFFFFFF] = "%s.%s" % (sname.replace("rogue_fwif_", ""), path)
+            if isinstance(v, int) and (v & 0xFFFFFFFF) & 0xFF000000 == 0x5A000000 and v >> 32:
+                self.tags[v & 0xFFFFFFFF] = "%s.%s" % (sname.replace("rogue_fwif_", ""), path)
+
+    def watch_obj(self, name, va, size):
+        self.watch[name] = (va, size)
+
+    def snapshot(self):
+        return {n: self.emu.read(va, sz) for n, (va, sz) in self.watch.items()}
+
+    def mark(self, name):
+        """Close the current step: collect register writes, memory changes
+        and new trace lines since the previous mark."""
+        e = self.emu
+        log = e.reg_log
+        start = getattr(self, "_log_pos", 0)
+        writes = [(o & ~0x200000, v) for k, o, v in log[start:] if k == "W"]
+        accesses = [(k, o & ~0x200000, v) for k, o, v in log[start:]]
+        self._log_pos = len(log)
+        trace = e.trace()
+        new_trace = [m for _, m in trace[getattr(self, "_trace_pos", 0):]]
+        self._trace_pos = len(trace)
+        snap = self.snapshot()
+        prev = getattr(self, "_snap", {})
+        mem = {}
+        for n, data in snap.items():
+            if prev.get(n) != data:
+                mem[n] = data
+        self._snap = snap
+        step = {"step": name, "writes": writes, "accesses": accesses, "mem": mem,
+                "trace": new_trace, "kicks": list(self.kicks)}
+        self.kicks = []
+        self.steps.append(step)
+        return step
+
+    # -- driving -------------------------------------------------------------------------
+    def settle(self, label, complete=True, rounds=24):
+        """Deliver queued MTS tasks; complete started work like the GPU."""
+        e = self.emu
+        with self.out():
+            for _ in range(rounds):
+                if e.pending_tasks:
+                    e.inject(e.pending_tasks.pop(0))
+                    continue
+                if complete and self.kicks_pending():
+                    continue
+                break
+        return self.mark(label)
+
+    def kicks_pending(self):
+        done = getattr(self, "_done_kicks", 0)
+        if done >= len(self.all_kicks()):
+            return False
+        off = self.all_kicks()[done]
+        self._done_kicks = done + 1
+        dm, bits = KICKS[off]
+        if self.p.get("status_tags"):
+            for reg in STATUS_REGS.get(dm, ()):
+                self.emu.regs[reg] = 0x7E000000 | reg
+        self.emu.event_status |= bits
+        self.emu.pending_tasks.append("irq")
+        return True
+
+    def all_kicks(self):
+        if not hasattr(self, "_kick_hist"):
+            self._kick_hist = []
+        self._kick_hist.extend(self.kicks)
+        self.kicks = []
+        return self._kick_hist
+
+    def kccb_bg(self):
+        self.emu.pending_tasks.append("bg")
+
+    # -- reports ---------------------------------------------------------------------------
+    def reg_name(self, off):
+        return self.names.get(off) or (self.names.get(off - 4, "?") + "[hi]"
+                                       if off - 4 in self.names else "?")
+
+    def describe(self, step, show_writes=True, reads=False):
+        out = ["== %s" % step["step"]]
+        if show_writes:
+            seq = step["accesses"] if reads else [("W", o, v) for o, v in step["writes"]]
+            for k, off, v in seq:
+                if k == "P":
+                    out.append("  P %-34s +0x%05x & 0x%08x == 0x%08x" % (
+                        self.reg_name(off), off, v[1], v[0]))
+                    continue
+                t = self.tags.get(v)
+                out.append("  %s %-34s +0x%05x = 0x%08x%s" % (
+                    k, self.reg_name(off), off, v, "  <- " + t if t else ""))
+        for n, data in step["mem"].items():
+            out.append("  M %-20s %s" % (n, data.hex()))
+        for m in step["trace"]:
+            out.append("  T %s" % m)
+        return "\n".join(out)
+
+
+class _Null:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+# Scenario inputs; tools/fwemu/vary.py changes them one at a time to find
+# out which register values depend on which input.
+DEFAULT_PARAMS = {
+    "shift": 0,                       # extra FW heap allocation before the scenario
+    "pc": 0x90000000,                 # page catalogue physical address of the VM
+    "fl_addr": 0xE200000000, "fl_initial": 256, "fl_max": 4096, "fl_grow": 64,
+    "gfl_addr": 0xE210000000,
+    "width": 1920, "height": 1080, "samples": 1,
+    "callstack": 0xE300000000,
+    "geom": {}, "rt": None,
+    "status_tags": 0,
+    "override": {},                  # {struct name: {field path: value}}
+    "reg_init": {},                  # {register offset: power-on value}
+}
+
+
+# -- scenarios ---------------------------------------------------------------------------
+def fields(r, sname, base, extra=None):
+    vals = H.tagged(sname, base, extra)
+    vals.update(r.p["override"].get(sname, {}))
+    return vals
+
+
+def compute_job(r, ctx, deps=(), base=0):
+    vals = fields(r, "rogue_fwif_cmd_compute", base)
+    r.tag_fields("rogue_fwif_cmd_compute", vals)
+    payload = H.cmd(r.host.L, "rogue_fwif_cmd_compute", vals)
+    return r.host.job(ctx.queues["compute"], H.CCB_CDM, payload, deps)
+
+
+def watch_queue(r, q, prefix):
+    r.watch_obj(prefix + ".cccb_ctl", q.ctrl, 32)
+    r.watch_obj(prefix + ".ufo", q.ufo, 4)
+
+
+def sc_compute(r, n=1, chained=False):
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.compute_context(vm)
+    r.ctx = ctx
+    q = ctx.queues["compute"]
+    watch_queue(r, q, "compute")
+    r.watch_obj("kccb_rtn", r.emu.kccb_rtn, 16)
+    r.watch_obj("fwmemctx", vm, 16)
+    r.mark("setup")
+    prev = None
+    jobs = []
+    for i in range(n):
+        deps = [prev.fence()] if (chained and prev) else []
+        j = compute_job(r, ctx, deps, base=0x10 * i)
+        h.submit(j)
+        r.kccb_bg()
+        r.settle("compute job %d" % (i + 1))
+        jobs.append(j)
+        prev = j
+    return {"jobs_done": [j.done() for j in jobs], "ufo": q.ufo_value(),
+            "read_offset": h.get("rogue_fwif_cccb_ctl", q.ctrl, "read_offset"),
+            "write_offset": q.write_offset}
+
+
+def sc_transfer(r):
+    h = r.host
+    vm = h.vm_context(r.p["pc"])
+    ctx = h.transfer_context(vm)
+    q = ctx.queues["transfer"]
+    watch_queue(r, q, "transfer")
+    r.mark("setup")
+    # Mesa only submits transfers in FAST_2D / FAST_SCALE ISP mode
+    vals = fields(r, "rogue_fwif_cmd_transfer", 0x40, {"regs.isp_render": 0x5A05A000 | 2})
+    r.tag_fields("rogue_fwif_cmd_transfer", vals)
+    j = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
+    h.submit(j)
+    r.kccb_bg()
+    r.settle("transfer job")
+    return {"jobs_done": [j.done()], "ufo": q.ufo_value(),
+            "read_offset": h.get("rogue_fwif_cccb_ctl", q.ctrl, "read_offset"),
+            "write_offset": q.write_offset}
+
+
+def sc_render(r, with_frag=True):
+    h = r.host
+    p = r.p
+    vm = h.vm_context(p["pc"])
+    ctx = h.render_context(vm, callstack_addr=p["callstack"])
+    gq, fq = ctx.queues["geometry"], ctx.queues["fragment"]
+    fl = h.free_list(vm, gpu_addr=p["fl_addr"], initial=p["fl_initial"], max_pages=p["fl_max"],
+                     grow=p["fl_grow"])
+    gfl = h.free_list(vm, gpu_addr=p["gfl_addr"], initial=p["fl_initial"],
+                      max_pages=p["fl_max"], grow=p["fl_grow"])
+    rt = h.hwrt([fl, gfl], width=p["width"], height=p["height"], samples=p["samples"],
+                geom=p["geom"], rt=p["rt"])
+    r.rt, r.fl, r.gfl = rt, fl, gfl
+    watch_queue(r, gq, "geom")
+    watch_queue(r, fq, "frag")
+    r.watch_obj("hwrtdata0", rt.data[0], h.L.size("rogue_fwif_hwrtdata"))
+    r.watch_obj("freelist", fl.fw, h.L.size("rogue_fwif_freelist"))
+    r.watch_obj("fwccb_ctl", r.emu.fwccb_ctl, 4)
+    r.mark("setup")
+    gvals = fields(r, "rogue_fwif_cmd_geom", 0x80, {"flags": 0x3})   # FIRSTKICK | LASTKICK
+    r.tag_fields("rogue_fwif_cmd_geom", gvals)
+    gvals["cmd_shared.hwrt_data_fw_addr"] = rt.data[0]
+    geom = h.job(gq, H.CCB_GEOM, H.cmd(h.L, "rogue_fwif_cmd_geom", gvals), hwrt=rt.data[0])
+    pvals = fields(r, "rogue_fwif_cmd_frag", 0x100)
+    r.tag_fields("rogue_fwif_cmd_frag", pvals)
+    pvals["cmd_shared.hwrt_data_fw_addr"] = rt.data[0]
+    pr = h.job(fq, H.CCB_FRAG_PR, H.cmd(h.L, "rogue_fwif_cmd_frag", pvals), hwrt=rt.data[0])
+    h.submit_combined(geom, pr)
+    r.kccb_bg()
+    r.settle("geometry + PR kick")
+    res = {"geom_done": geom.done(), "pr_done": pr.done()}
+    if with_frag:
+        fvals = fields(r, "rogue_fwif_cmd_frag", 0x180)
+        r.tag_fields("rogue_fwif_cmd_frag", fvals)
+        fvals["cmd_shared.hwrt_data_fw_addr"] = rt.data[0]
+        frag = h.job(fq, H.CCB_FRAG, H.cmd(h.L, "rogue_fwif_cmd_frag", fvals),
+                     deps=[geom.fence()], hwrt=rt.data[0])
+        h.submit(frag)
+        r.kccb_bg()
+        r.settle("fragment kick")
+        res["frag_done"] = frag.done()
+    res["geom_ufo"], res["frag_ufo"] = gq.ufo_value(), fq.ufo_value()
+    return res
+
+
+def sc_cleanup(r):
+    res = sc_compute(r)
+    h = r.host
+    slot = h.cleanup(H.CLEANUP_FWCOMMONCONTEXT, r.ctx.fw_addr(r.ctx.queues["compute"]))
+    r.kccb_bg()
+    r.settle("context cleanup")
+    res["cleanup_rtn"] = r.emu.r32(r.emu.kccb_rtn + 4 * slot)
+    return res
+
+
+SCENARIOS = {
+    "compute": lambda r: sc_compute(r),
+    "compute2": lambda r: sc_compute(r, n=2, chained=True),
+    "transfer": sc_transfer,
+    "render": sc_render,
+    "geom": lambda r: sc_render(r, with_frag=False),
+    "cleanup": sc_cleanup,
+}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("fw")
+    ap.add_argument("scenario", nargs="+", choices=sorted(SCENARIOS))
+    ap.add_argument("--kernel", required=True)
+    ap.add_argument("--json")
+    ap.add_argument("--no-writes", action="store_true")
+    ap.add_argument("--verbose", action="store_true", help="show emulator output")
+    args = ap.parse_args()
+    results = {}
+    for sc in args.scenario:
+        r = Runner(args.fw, args.kernel, quiet=not args.verbose)
+        r.boot()
+        res = SCENARIOS[sc](r)
+        print("##### %s: %s" % (sc, res))
+        for st in r.steps[1:]:
+            print(r.describe(st, not args.no_writes))
+        results[sc] = {"result": res, "steps": [
+            {"step": s["step"], "writes": s["writes"], "trace": s["trace"],
+             "mem": {k: v.hex() for k, v in s["mem"].items()}} for s in r.steps]}
+    if args.json:
+        json.dump(results, open(args.json, "w"), indent=1)
+
+
+if __name__ == "__main__":
+    main()

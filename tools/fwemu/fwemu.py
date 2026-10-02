@@ -73,8 +73,26 @@ PAGE = 0x1000
 # polled hardware operation by presenting the awaited value.
 # poll_mc(core_mask, reg_offset, value, mask) is the per-core variant.
 # Keyed by "BVNC/build"; values: (reg, value, mask) argument registers.
+# poll_fast(reg, value, mask) spins 2000 times before falling back to poll(),
+# poll_fast_mc(core_mask, reg, value, mask) likewise to poll_mc().
 POLL_FUNCS = {"36.50.54.182/6503725": {0xC0008C7C: ("a0", "a1", "a2"),
-                                       0xC0008D8C: ("a1", "a2", "a3")}}
+                                       0xC0008D8C: ("a1", "a2", "a3"),
+                                       0xC0008EE4: ("a0", "a1", "a2"),
+                                       0xC0008F20: ("a1", "a2", "a3")}}
+
+
+
+def openfw_poll_funcs(fw_path):
+    """openfw's poll_reg(off, mask, value), from the link map built next to the image."""
+    m = os.path.join(os.path.dirname(os.path.abspath(fw_path)), "openfw.map")
+    if not os.path.exists(m):
+        return {}
+    for line in open(m):
+        f = line.split()
+        if len(f) == 2 and f[1] == "poll_reg" and f[0].startswith("0x"):
+            return {int(f[0], 16) & ~1: ("a0", "a2", "a1")}
+    return {}
+
 
 # Reset values the firmware relies on. CLK_CTRL comes out of reset with
 # every unit in automatic clock gating (DDK rgxdefs_km.h: CLK_CTRL_ALL_AUTO
@@ -136,19 +154,26 @@ class Layout:
         off = 0
         t = None
         for part in path.split("."):
-            idx = None
+            idxs = []
             if "[" in part:
                 part, rest = part.split("[", 1)
-                idx = int(rest.rstrip("]"), 0)
+                idxs = [int(x, 0) for x in rest.rstrip("]").split("][")]
             m = next((m for m in st["members"] if m["name"] == part), None)
             if m is None:
                 raise KeyError("%s has no member %s" % (name, part))
             off += m["offset"]
             t = m["type"]
-            if idx is not None:
-                elem = t["elem"]
-                off += idx * elem["size"]
-                t = elem
+            if idxs:
+                if t["kind"] != "array":
+                    raise KeyError("%s.%s is not an array" % (name, part))
+                dims = t.get("dims") or [t["size"] // t["elem"]["size"]]
+                if len(idxs) != len(dims):
+                    raise KeyError("%s.%s needs %d indices" % (name, part, len(dims)))
+                flat = 0
+                for k, idx in enumerate(idxs):
+                    flat = flat * dims[k] + idx
+                t = t["elem"]
+                off += flat * t["size"]
             if t["kind"] in ("struct", "union"):
                 st = self.structs.get(t.get("name")) or self.anon[str(t["die_offset"])]
                 name = t.get("name") or name
@@ -369,6 +394,10 @@ class Emu:
             0x0020: bvnc & 0xffffffff,            # CORE_ID__PBVNC lo
             0x0024: bvnc >> 32,                   # CORE_ID__PBVNC hi
             0xF308: 1,                            # MULTICORE_SYSTEM: 1 GPU
+            # MULTICORE_GPU of the only core: primary, with fragment,
+            # geometry and compute capability, ID 0. The firmware registers
+            # geometry/fragment cores from these bits at boot.
+            0xF300: 0x78,
         }
         if off in fixed:
             return fixed[off]
@@ -534,8 +563,10 @@ class Emu:
         last_pcs = []
 
         pending = []
-        poll_funcs = (POLL_FUNCS.get("%s/%d" % (self.fw.bvnc_str, self.fw.ver_build), {})
-                      if self.args.complete_polls else {})
+        poll_funcs = {}
+        if self.args.complete_polls:
+            poll_funcs.update(POLL_FUNCS.get("%s/%d" % (self.fw.bvnc_str, self.fw.ver_build), {}))
+            poll_funcs.update(openfw_poll_funcs(self.fw.path))
         argreg = {"a0": MC.UC_MIPS_REG_A0, "a1": MC.UC_MIPS_REG_A1,
                   "a2": MC.UC_MIPS_REG_A2, "a3": MC.UC_MIPS_REG_A3}
 
@@ -546,6 +577,7 @@ class Emu:
                 val = uc.reg_read(argreg[r_val])
                 mask = uc.reg_read(argreg[r_mask])
                 self.polls.append((reg, val, mask))
+                self.reg_log.append(("P", reg, (val, mask)))
                 if self.args.trace_regs:
                     print("  P %-34s +0x%06x & 0x%08x == 0x%08x" % (
                         self.reg_name(reg), reg, mask, val))
@@ -762,7 +794,7 @@ class Emu:
         for off, cnt in c.most_common(n):
             print("    %-36s +0x%06x  %6d reads, last value 0x%08x" % (
                 self.reg_name(off), off, cnt,
-                next(v for k, o, v in reversed(recent) if o == off)))
+                next(v for k, o, v in reversed(recent) if o == off and k == "R")))
 
     def drain_irqs(self):
         for _ in range(16):
@@ -836,7 +868,8 @@ class Emu:
             self.r32(self.objects["power_sync"][0])))
         writes = [(o, v) for k, o, v in self.reg_log if k == "W"]
         print("register writes: %d (%d distinct registers), reads: %d" % (
-            len(writes), len({o for o, _ in writes}), len(self.reg_log) - len(writes)))
+            len(writes), len({o for o, _ in writes}),
+            sum(1 for k, _, _ in self.reg_log if k == "R")))
         if self.args.trace_mask:
             entries = self.trace()
             print("firmware trace:")

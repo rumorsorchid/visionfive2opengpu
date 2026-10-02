@@ -24,12 +24,12 @@ ASFLAGS = -march=mips32r2 -mmicromips -EL -msoft-float -mno-abicalls -fno-pic -G
 LDFLAGS = -nostdlib -static -T link.ld -Wl,--build-id=none -Wl,-z,max-page-size=4096 \
           -Wl,-Map,openfw.map
 
-OBJS = start.o boot.o main.o
+OBJS = start.o boot.o main.o sched.o kicks.o gpu.o
 FW   = rogue_$(BVNC)_v1.fw
 
 all: $(FW)
 
-%.o: %.c fwif.h mips.h mmu.h regs.h
+%.o: %.c fw.h fwif.h mips.h mmu.h regs.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 %.o: %.S mips.h
@@ -40,7 +40,7 @@ openfw.elf: $(OBJS) link.ld
 	@# from .text/.rodata/.data/.bss
 	@$(CROSS)size -A boot.o | awk '$$1 ~ /^\.(text|rodata|data|bss|sdata|sbss)/ && $$2 != 0 \
 		{ print "boot.o: non-empty " $$1; bad = 1 } END { exit bad }'
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) -lgcc
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
 
 openfw.dis: openfw.elf
 	$(OBJDUMP) -d -M micromips $< > $@
@@ -64,6 +64,7 @@ test: $(FW)
 	$(PYTHON) test_mmu.py openfw.elf
 	@test -n "$(KERNEL)" || { echo "set KERNEL=<linux source tree> for the contract test"; exit 1; }
 	$(PYTHON) test_contract.py $(FW) $(REFERENCE) --kernel $(KERNEL)
+	@if [ -n "$(REFERENCE)" ]; then $(PYTHON) test_jobs.py $(FW) $(REFERENCE) --kernel $(KERNEL); fi
 
 clean:
 	rm -f *.o openfw.elf openfw.map openfw.dis $(FW)

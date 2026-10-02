@@ -31,6 +31,14 @@
 #define CR_MTS_DM2_INTERRUPT_ENABLE	0x0B68u
 #define CR_MTS_DM3_INTERRUPT_ENABLE	0x0B70u
 #define CR_MTS_DM4_INTERRUPT_ENABLE	0x0B78u
+#define CR_BIF_CAT_BASE0	0x1200u		/* 64-bit, BIF_CAT_BASEn at + 8 * n */
+#define CR_BIF_CAT_BASE_INDEX	0x1240u		/* 64-bit, 3-bit set index per DM */
+#define CR_BIF_PM_CAT_BASE_VCE0	0x1248u
+#define CR_BIF_PM_CAT_BASE_TE0	0x1250u
+#define CR_BIF_PM_CAT_BASE_ALIST0 0x1260u
+#define CR_BIF_PM_CAT_BASE_VCE1	0x1268u
+#define CR_BIF_PM_CAT_BASE_TE1	0x1270u
+#define CR_BIF_PM_CAT_BASE_ALIST1 0x1280u
 #define CR_BIF_CTRL_INVAL	0x12A0u
 #define CR_BIF_FAULT_READ	0x13E0u		/* 64-bit */
 #define CR_SLC_CTRL_FLUSH_INVAL	0x3818u
@@ -39,6 +47,7 @@
 
 /* EVENT_STATUS / EVENT_CLEAR / MTS_DMn_INTERRUPT_ENABLE bits */
 #define EVENT_SLAVE_REQ		(1u << 19)
+#define EVENT_PM_3D_MEM_FREE	(1u << 8)	/* PM deallocation done after a render */
 #define EVENT_USC_TRIGGER	(1u << 15)
 #define EVENT_ZLS_FINISHED	(1u << 14)
 #define EVENT_GPIO_ACK		(1u << 13)

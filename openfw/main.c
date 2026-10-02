@@ -1,53 +1,18 @@
 // SPDX-License-Identifier: MIT
 /*
- * openfw M0: an open firmware for the PowerVR BXE-4-32 MIPS firmware
- * processor that the upstream Linux powervr driver accepts and keeps
- * alive: boot handshake, kernel CCB processing, MMU cache maintenance,
- * power requests and firmware tracing. It does not execute GPU jobs yet
- * (KICK commands are consumed and reported, see README.md).
+ * openfw: an open firmware for the PowerVR BXE-4-32 MIPS firmware
+ * processor, for the upstream Linux powervr driver: boot handshake, kernel
+ * CCB processing, MMU cache maintenance, power requests, firmware tracing
+ * and job execution (sched.c, kicks.c, gpu.c).
  *
  * Execution model: fw_main() initialises and idles in `wait`. All work
  * happens in non-nesting handlers (start.S) entered from the idle loop:
  * the MTS background task (kernel CCB kicks), the MTS interrupt task (GPU
  * events) and a periodic CP0 timer that re-checks the kernel CCB.
  */
-#include "fwif.h"
-#include "mips.h"
+#include "fw.h"
 #include "mmu.h"
-#include "regs.h"
 
-typedef unsigned int u32;
-typedef unsigned long long u64;
-
-#define FW32(addr) (*(volatile u32 *)(addr))
-
-/*
- * Code that rewrites TLB entries runs from the exceptions page (kseg0,
- * unmapped), like the reference firmware's: a TLB refill between its
- * EntryHi/EntryLo/Index writes and the tlbwi would clobber them.
- */
-#define KSEG0_TEXT __attribute__((section(".exc.text"), noinline))
-
-/* enum rogue_fwif_kccb_cmd_type (pvr_rogue_fwif.h) */
-#define CMD_MAGIC		0x2ABC0000u
-#define KCCB_KICK		(101u | CMD_MAGIC)
-#define KCCB_MMUCACHE		(102u | CMD_MAGIC)
-#define KCCB_SLCFLUSHINVAL	(105u | CMD_MAGIC)
-#define KCCB_CLEANUP		(106u | CMD_MAGIC)
-#define KCCB_POW		(107u | CMD_MAGIC)
-#define KCCB_HEALTH_CHECK	(115u | CMD_MAGIC)
-#define KCCB_COMBINED_KICK	(117u | CMD_MAGIC)
-#define KCCB_LOGTYPE_UPDATE	(206u | CMD_MAGIC)
-
-#define KCCB_RTN_CMD_EXECUTED	(1u << 0)
-
-/* enum rogue_fwif_pow_state */
-#define POW_OFF			0u
-#define POW_ON			1u
-#define POW_FORCED_IDLE		2u
-#define POW_IDLE		3u
-
-/* enum rogue_fwif_power_type, rogue_fwif_power_force_idle_type */
 #define POW_OFF_REQ		1u
 #define POW_FORCED_IDLE_REQ	2u
 #define POW_NUM_UNITS_CHANGE	3u
@@ -56,9 +21,11 @@ typedef unsigned long long u64;
 
 #define CONNECTION_FW_ACTIVE	2u
 
+/* kccb_handle(): kicks have no return value; the kernel does not wait */
+#define KCCB_NO_RTN		0xFFFFFFFFu
+
 #define MMUCACHE_BIF_MASK	0xFu	/* PT | PD | PC | TLB1 -> BIF_CTRL_INVAL */
 
-/* CP0 Count runs at half the core clock: ~80 ms at 400 MHz */
 #define TIMER_PERIOD		0x01000000u
 
 #define TRAP_EXCEPTION		0
@@ -72,14 +39,7 @@ struct frame {
 	u32 epc, status, hi, lo;
 };
 
-static struct {
-	u32 kccb_ctl, kccb, kccb_rtn;
-	u32 osdata, sysdata, power_sync;
-	u32 tracebuf_ctl;
-	u32 dusts;
-	u32 halt;
-	u32 fault_va, fault_count;
-} g;
+struct fw_globals g;
 
 /* ------------------------------------------------------------------------
  * Tracing into the kernel's trace buffer (decoded by pvr_fw_trace.c)
@@ -102,7 +62,7 @@ static u64 timer_read(void)
 	return ((u64)hi << 32 | lo) & 0x0000FFFFFFFFFFFFull;
 }
 
-static void trace_n(u32 id, u32 n, const u32 *args, int force)
+void trace_n(u32 id, u32 n, const u32 *args, int force)
 {
 	u32 tb = g.tracebuf_ctl, log_type, size, buf, p;
 
@@ -128,14 +88,6 @@ static void trace_n(u32 id, u32 n, const u32 *args, int force)
 	FW32(tb + OFF_TRACEBUF_TRACEBUF0_TRACE_POINTER) = p;
 }
 
-#define TRACE(id, ...) do { \
-	const u32 __a[] = { 0, ##__VA_ARGS__ }; \
-	trace_n(id, sizeof(__a) / sizeof(u32) - 1, __a + 1, 0); \
-} while (0)
-#define TRACE_FORCE(id, ...) do { \
-	const u32 __a[] = { 0, ##__VA_ARGS__ }; \
-	trace_n(id, sizeof(__a) / sizeof(u32) - 1, __a + 1, 1); \
-} while (0)
 
 /* ------------------------------------------------------------------------
  * Helpers
@@ -149,7 +101,7 @@ static void __attribute__((noreturn)) halt(void)
 	}
 }
 
-static int poll_reg(u32 off, u32 mask, u32 value)
+int poll_reg(u32 off, u32 mask, u32 value)
 {
 	for (u32 i = 0; i < 1000000; i++) {
 		if ((reg_read(off) & mask) == value)
@@ -159,7 +111,7 @@ static int poll_reg(u32 off, u32 mask, u32 value)
 	return -1;
 }
 
-static void host_irq(void)
+void host_irq(void)
 {
 	mips_sync();
 	reg_write(CR_MIPS_WRAPPER_IRQ_STATUS, 1);
@@ -172,12 +124,12 @@ static void mts_task_done(u32 v)
 	(void)reg_read(CR_MTS_TASK_DONE);
 }
 
-static void set_pow_state(u32 s)
+void set_pow_state(u32 s)
 {
 	FW32(g.sysdata + OFF_SYSDATA_POW_STATE) = s;
 }
 
-static u32 pow_state(void)
+u32 pow_state(void)
 {
 	return FW32(g.sysdata + OFF_SYSDATA_POW_STATE);
 }
@@ -187,7 +139,7 @@ static u32 pow_state(void)
  * access re-reads the page table: the kernel may have unmapped or moved
  * firmware objects.
  */
-static KSEG0_TEXT void fw_tlb_flush(void)
+KSEG0_TEXT void fw_tlb_flush(void)
 {
 	for (u32 i = WIRED_ENTRIES; i < TLB_ENTRIES; i++) {
 		tlb_write_index(i, 0xF0000000u + (i << 13), 0, 0);
@@ -273,15 +225,22 @@ static u32 kccb_handle(u32 cmd, u32 type, u32 slot)
 		/* log_type is re-read on every trace */
 		fw_tlb_flush();
 		break;
+	case KCCB_KICK:
+		sched_kick(cmd + OFF_KCCB_CMD_CMD_DATA);
+		return KCCB_NO_RTN;
+	case KCCB_COMBINED_KICK:
+		/* geometry and fragment kick data, back to back */
+		sched_kick(cmd + OFF_KCCB_CMD_CMD_DATA);
+		sched_kick(cmd + OFF_KCCB_CMD_CMD_DATA + SIZEOF_KCCB_CMD_KICK_DATA);
+		return KCCB_NO_RTN;
 	case KCCB_CLEANUP:
-		/* Nothing is ever scheduled, so nothing is ever busy. */
-		break;
+		return sched_cleanup(FW32(cmd + OFF_KCCB_CMD_CMD_DATA + OFF_CLEANUP_REQUEST_CLEANUP_TYPE),
+				     FW32(cmd + OFF_KCCB_CMD_CMD_DATA + OFF_CLEANUP_REQUEST_CLEANUP_DATA));
 	case KCCB_SLCFLUSHINVAL:
 		reg_write(CR_SLC_CTRL_FLUSH_INVAL, 1);	/* ALL */
 		poll_reg(CR_SLC_STATUS0, SLC_STATUS0_PENDING, 0);
 		break;
 	default:
-		/* KICK / COMBINED_GEOM_FRAG_KICK and the rest: not in M0. */
 		TRACE_FORCE(SF_OPENFW_KCCB_UNKNOWN, g.kccb_ctl, g.kccb, slot,
 			    FW32(g.kccb_ctl + OFF_CCB_CTL_WRITE_OFFSET),
 			    FW32(g.kccb_ctl + OFF_CCB_CTL_WRAP_MASK), cmd, type);
@@ -292,7 +251,7 @@ static u32 kccb_handle(u32 cmd, u32 type, u32 slot)
 
 static void kccb_process(void)
 {
-	u32 ctl = g.kccb_ctl, done = 0;
+	u32 ctl = g.kccb_ctl, irq = 0;
 
 	while (!g.halt) {
 		u32 ro = FW32(ctl + OFF_CCB_CTL_READ_OFFSET);
@@ -307,14 +266,17 @@ static void kccb_process(void)
 		TRACE(SF_OPENFW_KCCB, ro, type, 0);
 		u32 rtn = kccb_handle(cmd, type, ro);
 
-		FW32(g.kccb_rtn + 4 * ro) = rtn;
-		TRACE(SF_OPENFW_KCCB_RTN, ro, rtn);
+		if (rtn != KCCB_NO_RTN) {
+			/* the kernel waits for this one: return value and interrupt */
+			FW32(g.kccb_rtn + 4 * ro) = rtn;
+			TRACE(SF_OPENFW_KCCB_RTN, ro, rtn);
+			irq = 1;
+		}
 		FW32(g.osdata + OFF_OSDATA_KCCB_CMDS_EXECUTED) += 1;
 		mips_sync();
 		FW32(ctl + OFF_CCB_CTL_READ_OFFSET) = (ro + 1) & wrap;
-		done++;
 	}
-	if (done)
+	if (irq)
 		host_irq();
 }
 
@@ -326,9 +288,10 @@ static void fw_bg_task(void)
 {
 	TRACE(SF_OPENFW_BG, 0);
 	kccb_process();
-	/* M0 never has work in flight: report idle so the kernel may
-	 * runtime-suspend the GPU. */
-	if (pow_state() == POW_ON)
+	sched_run();
+	/* Nothing in flight: report idle so the kernel may runtime-suspend
+	 * the GPU. */
+	if (sched_idle() && pow_state() == POW_ON)
 		set_pow_state(POW_IDLE);
 	mts_task_done(MTS_TASK_DONE_BG);
 	if (g.halt)
@@ -340,8 +303,12 @@ static void fw_irq_task(void)
 	u32 ev = reg_read(CR_EVENT_STATUS);
 
 	TRACE(SF_OPENFW_IRQ, ev);
+	/* job events are cleared when their job is finished */
+	ev &= ~(EVENT_TA_FINISHED | EVENT_PIXELBE_END_RENDER | EVENT_COMPUTE_FINISHED |
+		EVENT_PM_3D_MEM_FREE | EVENT_PM_OUT_OF_MEMORY);
 	if (ev)
 		reg_write(CR_EVENT_CLEAR, ev);
+	sched_irq();
 	mts_task_done(MTS_TASK_DONE_IRQ);
 }
 
@@ -349,6 +316,7 @@ static void fw_timer(void)
 {
 	mtc0(C0_COMPARE, 0, mfc0(C0_COUNT, 0) + TIMER_PERIOD);
 	kccb_process();		/* safety net for a lost MTS kick */
+	sched_run();
 	if (g.halt)
 		halt();
 }
