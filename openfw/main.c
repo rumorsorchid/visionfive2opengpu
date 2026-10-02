@@ -147,6 +147,12 @@ void fwccb_send(u32 type, u32 a0, u32 a1, u32 a2)
 	fwccb_post(type, d, 3);
 }
 
+/* Queue an MTS task: 0 the background task, 0x20 | dm an interrupt task. */
+void mts_schedule(u32 v)
+{
+	reg_write(CR_MTS_SCHEDULE, v);
+}
+
 /* Tell the MTS the current task has finished (the write is read back). */
 static void mts_task_done(u32 v)
 {

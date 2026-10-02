@@ -13,7 +13,7 @@
  *
  * There is no initialised writable data: the data object survives GPU
  * power cycles while the firmware reboots, so state lives in .bss, which
- * the reset code clears on every boot.
+ * the reset code clears on every boot, or in .persist, which it keeps.
  */
 OUTPUT_ARCH(mips)
 ENTRY(_reset)
@@ -46,6 +46,13 @@ SECTIONS
 		. = ALIGN(4);
 		__bss_end = .;
 	} :data
+	/* not cleared on boot: zero when the kernel loads the firmware,
+	 * kept across GPU power cycles (the firmware reboots) */
+	.persist (NOLOAD) : {
+		. = ALIGN(8);
+		*(.persist)
+		__persist_end = .;
+	} :data
 
 	/DISCARD/ : {
 		*(.MIPS.abiflags) *(.reginfo) *(.comment) *(.note*) *(.pdr)
@@ -57,4 +64,4 @@ ASSERT(SIZEOF(.exc) <= 0x1000, "exception code exceeds its 4 KiB page")
 ASSERT(SIZEOF(.boot) <= 0x1000, "boot code exceeds its 4 KiB page")
 ASSERT(SIZEOF(.text) <= 0x30000, "code would overlap the private data at 0xC0032000")
 ASSERT(__data_end == __data_start, "initialised writable data is not supported (use .bss)")
-ASSERT(__bss_end <= 0xC0035000, "private data exceeds 12 KiB")
+ASSERT(__persist_end <= 0xC0034000, "private data exceeds the 8 KiB the boot code wires")

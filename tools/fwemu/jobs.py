@@ -951,11 +951,11 @@ def sc_hang_render(r, dm="TA", ticks=24):
             "fwccb": [(hex(t), sorted(i.items())) for t, i in fw]}
 
 
-def sc_hang_transfer(r, ticks=12, next_transfer=False):
+def sc_hang_transfer(r, ticks=12, next_transfer=True):
     """A transfer job (3D pipe, no render target) that never finishes;
-    then a compute job, or (next_transfer) another transfer job: the
-    reference firmware faults in that one's completion (a stale pointer in
-    its transfer bookkeeping after the recovery), so only openfw runs it."""
+    then another transfer job (or a compute job). Transfers are FAST_2D as
+    Mesa submits them: Imagination's firmware tells a transfer from a
+    fragment job on the 3D pipe by ISP_RENDER's mode."""
     h = r.host
     vm = h.vm_context(r.p["pc"])
     cctx = h.compute_context(vm)
@@ -965,7 +965,7 @@ def sc_hang_transfer(r, ticks=12, next_transfer=False):
     watch_hwr(r)
     r.mark("setup")
     r.hang.add("3D")
-    vals = fields(r, "rogue_fwif_cmd_transfer", 0)
+    vals = fields(r, "rogue_fwif_cmd_transfer", 0, {"regs.isp_render": 0x5A05A000 | 2})
     r.tag_fields("rogue_fwif_cmd_transfer", vals)
     j = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals))
     h.submit(j)
@@ -1269,7 +1269,8 @@ def sc_stress(r, seed, ops=40):
         elif op == "transfer":
             c = rnd.choice(xfer)
             q = c.queues["transfer"]
-            vals = fields(r, "rogue_fwif_cmd_transfer", 0x10 * (n % 8))
+            vals = fields(r, "rogue_fwif_cmd_transfer", 0x10 * (n % 8),
+                          {"regs.isp_render": 0x5A05A000 | 2})     # FAST_2D, as Mesa
             j = h.job(q, H.CCB_TQ_3D, H.cmd(h.L, "rogue_fwif_cmd_transfer", vals), deps())
             h.submit(j)
         elif op == "frame":
@@ -1441,7 +1442,7 @@ SCENARIOS = {
     "hang-two": sc_hang_two,
     "hang-transfer": sc_hang_transfer,
     **{"stress%d" % i: (lambda i: lambda r: sc_stress(r, i))(i) for i in range(64)},
-    "hang-transfer-next": lambda r: sc_hang_transfer(r, next_transfer=True),
+    "hang-transfer-compute": lambda r: sc_hang_transfer(r, next_transfer=False),
     "hang-compute-usc": sc_hang_compute_usc,
     "hang-compute-twice": lambda r: sc_hang_compute_usc(r, ticks=30, progress=4, twice=True),
     "overrun": sc_overrun,

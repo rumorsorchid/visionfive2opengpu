@@ -32,6 +32,7 @@ static struct {
 } spm;
 
 static const u32 hdr_size = SIZEOF_CCB_CMD_HEADER;
+static u32 pow_query;		/* idle seen, not reported yet (sched_idle_report) */
 
 static int ctx_is_ready(u32 ctx)
 {
@@ -115,12 +116,19 @@ static int fences_satisfied(u32 ctx, u32 payload, u32 size)
 	return 1;
 }
 
+/* UFOs signalled by the job completing now (sched_irq wakes their waiters) */
+#define MAX_SIGNALLED 8
+static u32 signalled[MAX_SIGNALLED], nsignalled;
+static int record_signalled;
+
 static void apply_updates(u32 payload, u32 size)
 {
 	for (u32 p = payload; p + 8 <= payload + size; p += 8) {
 		u32 addr = FW32(p), value = FW32(p + 4);
 
 		TRACE(SF_OPENFW_UFO_UPDATE, addr, value);
+		if (record_signalled && nsignalled < MAX_SIGNALLED)
+			signalled[nsignalled++] = addr;
 		if (addr & UFO_ADDR_IS_SYNC_CHECKPOINT)
 			FW32(addr & ~3u) = SYNC_CHECKPOINT_SIGNALED;
 		else
@@ -224,6 +232,7 @@ static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type, u32 pr)
 	if (!gpu_units_on) {
 		gpu_units_init();	/* also cancels any power-off */
 		set_pow_state(POW_ON);
+		pow_query = 0;
 	}
 	j->pcset = memctx_activate(j->memctx, dm);
 	if (j->pcset == ROGUE_FW_BIF_INVALID_PCSET) {
@@ -255,8 +264,9 @@ static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type, u32 pr)
 		kick_frag(j);
 		break;
 	}
-	if (pow_state() != POW_ON) {
+	if (pow_state() != POW_ON || pow_query) {
 		set_pow_state(POW_ON);
+		pow_query = 0;
 		gpu_cancel_power_off();
 	}
 	return 1;
@@ -301,8 +311,10 @@ static int process(u32 ctx)
 	cccb_open(ctx, &c);
 	dep = dep_walk(ctx, &c);
 	dm = FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
-	if (dm < DM_COUNT && running[dm].ctx == ctx)
-		return 0;			/* a job of this context is running */
+	if (dm < DM_COUNT && running[dm].ctx)
+		return 0;			/* its data master is busy: wait (also
+						 * for UPDATE/NULL/partial-render
+						 * commands, as the reference does) */
 	if (hwr_holds(dm))
 		return 0;			/* hardware recovery in progress */
 	off = FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET);
@@ -360,6 +372,27 @@ static u32 ctx_dm(u32 ctx)
 	return FW32(ctx + OFF_FWCOMMONCONTEXT_DM);
 }
 
+/* The fence command @ctx stopped at names a UFO signalled just now. */
+static int ctx_woken(u32 ctx)
+{
+	struct cccb c;
+	u32 d, t, p;
+
+	cccb_open(ctx, &c);
+	d = FW32(c.ctl + OFF_CCCB_CTL_DEP_OFFSET);
+	if (d == c.woff)
+		return 0;
+	t = cmd_type(&c, d);
+	if (t != CCB_FENCE && t != CCB_FENCE_PR)
+		return 0;
+	p = c.ccb + d + hdr_size;
+	for (u32 u = p; u + 8 <= p + cmd_size(&c, d); u += 8)
+		for (u32 i = 0; i < nsignalled; i++)
+			if (FW32(u) == signalled[i])
+				return 1;
+	return 0;
+}
+
 /*
  * Process the ready contexts of one data master: highest priority first
  * (PVR_CTX_PRIORITY_*), then in the order they became ready.
@@ -397,7 +430,7 @@ static int run_dm(u32 dm)
  */
 static const u8 dm_order[] = { DM_FRAG, DM_GEOM, DM_CDM };
 
-void sched_run(void)
+static void sched_schedule(void)
 {
 	int progress;
 
@@ -406,13 +439,37 @@ void sched_run(void)
 		for (u32 o = 0; o < sizeof(dm_order); o++)
 			progress |= run_dm(dm_order[o]);
 	} while (progress);
+}
 
-	if (sched_idle() && pow_state() == POW_ON) {
+/*
+ * Idle is reported in two steps, as the reference firmware does: when no
+ * job runs a power-off query is started and an interrupt task queued;
+ * that task reports IDLE (pow_state, host interrupt) if the GPU is still
+ * idle. A job starting in between cancels the query.
+ */
+static void sched_idle_report(void)
+{
+	if (sched_idle() && pow_state() == POW_ON && !pow_query) {
+		pow_query = 1;
+		mts_schedule(0x20);
+	}
+}
+
+static void sched_idle_confirm(void)
+{
+	if (pow_query && sched_idle() && pow_state() == POW_ON) {
 		/* Idle: let the kernel power the GPU down. */
+		pow_query = 0;
 		set_pow_state(POW_IDLE);
 		if (!g.kccb_irq)
 			host_irq();
 	}
+}
+
+void sched_run(void)
+{
+	sched_schedule();
+	sched_idle_report();
 }
 
 /* KCCB KICK / one half of COMBINED_GEOM_FRAG_KICK */
@@ -562,6 +619,8 @@ static const struct {
 void sched_irq(void)
 {
 	u32 ev = reg_read(CR_EVENT_STATUS);
+	int frag_done = 0;
+	u32 query = pow_query;		/* started by an earlier task */
 
 	if ((ev & EVENT_PM_OUT_OF_MEMORY) && running[DM_GEOM].ctx)
 		oom_geom(&running[DM_GEOM]);
@@ -569,9 +628,14 @@ void sched_irq(void)
 	for (u32 i = 0; i < sizeof(dm_events) / sizeof(dm_events[0]); i++) {
 		u32 dm = dm_events[i].dm;
 		struct job *j = &running[dm];
+		u32 partner;
 
 		if (!(ev & dm_events[i].event) || !j->ctx)
 			continue;
+		/* the other half of a render context waits on this one */
+		partner = j->type == CCB_GEOM ? j->ctx + OFF_FWRENDERCONTEXT_FRAG_CONTEXT :
+			  (j->type == CCB_FRAG || j->type == CCB_FRAG_PR) && !j->pr ?
+			  j->ctx - OFF_FWRENDERCONTEXT_FRAG_CONTEXT : 0;
 		switch (j->type) {
 		case CCB_CDM:
 			finish_cdm(j);
@@ -586,14 +650,39 @@ void sched_irq(void)
 			finish_frag(j);
 			break;
 		}
+		nsignalled = 0;
+		record_signalled = 1;
 		complete(dm);
-		if (dm == DM_FRAG)
+		record_signalled = 0;
+		if (dm == DM_FRAG) {
 			spm_try();		/* a partial render waits for the 3D */
+			frag_done = 1;
+		}
 		run_dm(dm);
-		if (dm == DM_FRAG && !running[DM_FRAG].ctx)
-			reg_write(0x6300, 1);	/* the 3D pipe goes idle */
+		if (partner && ctx_is_ready(partner))
+			process(partner);
+		/* after a 3D pipe job: geometry waiting on the fences it signalled */
+		if (dm == DM_FRAG && nsignalled) {
+			u32 list[MAX_READY], n = nready;
+
+			for (u32 k = 0; k < n; k++)
+				list[k] = ready[k];
+			for (u32 k = 0; k < n; k++)
+				if (list[k] != partner && ctx_dm(list[k]) == DM_GEOM &&
+				    ctx_is_ready(list[k]) && ctx_woken(list[k]))
+					process(list[k]);
+		}
 	}
-	sched_run();
+	if (frag_done && !running[DM_FRAG].ctx)
+		reg_write(0x6300, 1);		/* the 3D pipe goes idle */
+	/* other contexts (waiting on fences this signalled, or on a data
+	 * master that is free now): the background task re-checks them */
+	if (nready)
+		mts_schedule(0);
+	if (query)
+		sched_idle_confirm();
+	else
+		sched_idle_report();
 }
 
 /* -- cleanup ---------------------------------------------------------------------------- */

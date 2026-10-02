@@ -235,10 +235,15 @@ def main():
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--sweep", action="store_true",
                     help="also sweep every command field over bit patterns")
+    ap.add_argument("--stress", type=int, default=0, metavar="N",
+                    help="also run N randomised desktop-like workloads (seeds 0..N-1)")
+    ap.add_argument("--stress-from", type=int, default=0, metavar="SEED")
+    ap.add_argument("--no-cases", action="store_true",
+                    help="only the sweep and/or stress runs")
     args = ap.parse_args()
     ok = True
     for name, sc, params in CASES:
-        if args.only and not any(s in name for s in args.only):
+        if args.no_cases or args.only and not any(s in name for s in args.only):
             continue
         a = run(args.openfw, args.kernel, sc, params)
         b = run(args.reference, args.kernel, sc, params)
@@ -254,8 +259,17 @@ def main():
                 bad += 1
         print("sweep: %d of %d field values match" % (n - bad, n))
         ok &= not bad
+    if args.stress:
+        bad = 0
+        for seed in range(args.stress_from, args.stress_from + args.stress):
+            sc = "stress%d" % seed
+            if not compare(sc, run(args.openfw, args.kernel, sc, {}),
+                           run(args.reference, args.kernel, sc, {}), args.verbose):
+                bad += 1
+        print("stress: %d of %d workloads identical" % (args.stress - bad, args.stress))
+        ok &= not bad
     for name, sc, params in OUTCOME_CASES:
-        if args.only and not any(s in name for s in args.only):
+        if args.no_cases or args.only and not any(s in name for s in args.only):
             continue
         ok &= compare_outcome(name, run(args.openfw, args.kernel, sc, params),
                               run(args.reference, args.kernel, sc, params))

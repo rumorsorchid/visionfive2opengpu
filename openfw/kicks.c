@@ -227,10 +227,22 @@ static void pm_store_rtdata(u32 h)
 	fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST0));
 }
 
+static void pm_store_freelist(u32 pmctx, u32 kind, u32 fl);
+
 static void pm_load_freelist(u32 pmctx, u32 kind, u32 fl)
 {
 	const struct pm_fl_regs *r = &pm_fl[pmctx][kind];
-	u32 top = FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP);
+	u32 top;
+
+	/* another render's list leaves this PM context: its state first,
+	 * unless the other context holds it too (and keeps the live copy);
+	 * the other context's copy of the incoming list is the newest */
+	if (pm_loaded_fl[pmctx][kind] && pm_loaded_fl[pmctx][kind] != fl &&
+	    pm_loaded_fl[!pmctx][kind] != pm_loaded_fl[pmctx][kind])
+		pm_store_freelist(pmctx, kind, pm_loaded_fl[pmctx][kind]);
+	if (pm_loaded_fl[!pmctx][kind] == fl)
+		pm_store_freelist(!pmctx, kind, fl);
+	top = FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP);
 
 	copy64(r->base, fl + OFF_FREELIST_CURRENT_DEV_ADDR);
 	if (r->top_shift == 32)
@@ -338,19 +350,24 @@ void pm_reset(void)
  * keeps "ready pages" the kernel reserved at its last grow: they are handed
  * to the PM at once and the TA resumes, while a FREELIST_GROW request asks
  * the kernel for more (pvr_free_list_process_grow_req). Without ready
- * pages the TA stays stalled until the kernel's FREELIST_GROW_UPDATE.
- *
- * Not handled: a free list that cannot grow any more with no ready pages
- * left. Imagination's firmware then runs a partial render to free memory;
- * openfw leaves the TA stalled and the kernel's job timeout resets the GPU.
+ * pages the TA is stopped until the kernel's FREELIST_GROW_UPDATE. A free
+ * list that cannot grow any more, or a grow the kernel could not satisfy,
+ * gets a partial render instead: the 3D renders what the TA has binned so
+ * far, which frees its parameter memory, and the TA then resumes.
  */
+
+/* PM_PAGE_MANAGEOP: bit 0 pauses TA allocation, bit 1 3D deallocation */
+static void pm_pause(u32 bit, int pause)
+{
+	u32 v = reg_read(0x02A0);
+
+	reg_write(0x02A0, pause ? v | bit : v & ~bit);
+	poll_reg(0x02A8, bit, pause ? bit : 0);
+}
 
 static void pm_pause_ta_alloc(int pause)
 {
-	u32 v = reg_read(0x02A0);		/* PM_PAGE_MANAGEOP */
-
-	reg_write(0x02A0, pause ? v | 1 : v & ~1u);
-	poll_reg(0x02A8, 1, pause ? 1 : 0);
+	pm_pause(1, pause);
 }
 
 /* After a hardware recovery's GPU reset: the PM holds nothing any more. */
@@ -403,7 +420,34 @@ static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
 	FW32(fl + OFF_FREELIST_CURRENT_STACK_TOP) = top;
 	FW32(fl + OFF_FREELIST_READY_PAGES) = 0;
 	TRACE(SF_OPENFW_OOM_RESUMED, (u32)(base >> 32), (u32)base, cur, top);
-	reg_write(0x0328, 1);			/* resume the TA */
+}
+
+/* The kernel grows by grow_pages only while that fits under max_pages. */
+static int fl_growable(u32 fl, u32 cur)
+{
+	u32 grow = FW32(fl + OFF_FREELIST_GROW_PAGES);
+
+	return grow && cur + grow <= FW32(fl + OFF_FREELIST_MAX_PAGES);
+}
+
+/*
+ * Before the kernel is asked for more pages, or after the TA took the
+ * pages it kept in reserve: drain the TA (and a busy 3D), then ask for a
+ * grow when the list may grow and no request is outstanding.
+ */
+static void oom_drain_grow(u32 fl)
+{
+	gpu_dm_fence(DM_GEOM);
+	gpu_slc_flush(0x2);
+	if (sched_dm_busy(DM_FRAG))
+		gpu_dm_fence(DM_FRAG);
+	else
+		gpu_slc_flush(0x6);
+	if (fl_growable(fl, FW32(fl + OFF_FREELIST_CURRENT_PAGES)) &&
+	    !FW32(fl + OFF_FREELIST_GROW_PENDING)) {
+		FW32(fl + OFF_FREELIST_GROW_PENDING) = 1;
+		fwccb_send(FWCCB_FREELIST_GROW, FW32(fl + OFF_FREELIST_FREELIST_ID), 0, 0);
+	}
 }
 
 /*
@@ -459,11 +503,8 @@ void oom_geom(struct job *j)
 	u32 kind = hwrt_freelist(h, 1) ? 1 : 0;
 	u32 fl = hwrt_freelist(h, kind);
 	u32 ready = FW32(fl + OFF_FREELIST_READY_PAGES);
-	u32 cur = FW32(fl + OFF_FREELIST_CURRENT_PAGES) + ready;
 	int pending = FW32(fl + OFF_FREELIST_GROW_PENDING);
-	u32 grow = FW32(fl + OFF_FREELIST_GROW_PAGES);
-	/* the kernel grows by grow_pages only while that fits under max_pages */
-	int growable = grow && cur + grow <= FW32(fl + OFF_FREELIST_MAX_PAGES);
+	int growable = fl_growable(fl, FW32(fl + OFF_FREELIST_CURRENT_PAGES) + ready);
 
 	reg_write(CR_EVENT_CLEAR, EVENT_PM_OUT_OF_MEMORY);
 	TRACE(SF_OPENFW_OOM, j->ctx, h);
@@ -475,22 +516,16 @@ void oom_geom(struct job *j)
 		return;
 	}
 	if (ready) {
-		pm_grow_ta(kind, fl, ready);	/* the TA resumes at once */
+		pm_grow_ta(kind, fl, ready);
+		reg_write(0x0328, 1);		/* the TA resumes at once */
 	} else {
 		/* stop the TA until the kernel grows the list */
 		pr_stop_ta(j);
 		oom_wait_fl = fl;
 		oom_wait_kind = kind;
 	}
-	if (ready || (growable && !pending)) {
-		gpu_dm_fence(DM_GEOM);
-		gpu_slc_flush(0x2);
-		gpu_slc_flush(0x6);
-	}
-	if (growable && !pending) {
-		FW32(fl + OFF_FREELIST_GROW_PENDING) = 1;
-		fwccb_send(FWCCB_FREELIST_GROW, FW32(fl + OFF_FREELIST_FREELIST_ID), 0, 0);
-	}
+	if (ready || (growable && !pending))
+		oom_drain_grow(fl);
 	fwccb_send(FWCCB_UPDATE_STATS, FWCCB_STATS_NUM_OUT_OF_MEMORY, ctx_pid(j->ctx), 1);
 }
 
@@ -521,8 +556,11 @@ void freelist_grow_update(u32 d)
 
 		oom_wait_fl = 0;
 		pm_grow_ta(oom_wait_kind, fl, add);
-		reg_write(0x0CF8, 1);		/* restart the stopped TA */
 		FW32(fl + OFF_FREELIST_READY_PAGES) = newp - cur - add;
+		if (newp - cur <= ready)
+			oom_drain_grow(fl);	/* only reserve pages came */
+		reg_write(0x0328, 1);		/* resume the TA */
+		reg_write(0x0CF8, 1);		/* restart the stopped TA */
 		FW32(sched_running_hwrt(DM_GEOM) + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
 		hwr_kick(DM_GEOM, sched_running_job(DM_GEOM)->ctx);
 	} else {
@@ -562,13 +600,26 @@ void kick_geom(struct job *j)
 		pm_pending_stored = 1;
 	}
 	reg_write64(0x03D0, 0x100000100ull);
-	for (u32 k = 0; k < 2; k++) {
-		u32 fl = hwrt_freelist(h, k);
+	{
+		/* free lists to load while a render's 3D pass may free pages
+		 * on PM context 1: pause its deallocation around the loads */
+		int load = 0, pause;
 
-		if (fl && pm_loaded_fl[0][k] != fl)
-			pm_load_freelist(0, k, fl);
+		for (u32 k = 0; k < 2; k++)
+			load |= hwrt_freelist(h, k) && pm_loaded_fl[0][k] != hwrt_freelist(h, k);
+		pause = load && sched_dm_busy(DM_FRAG) && sched_running_hwrt(DM_FRAG);
+		if (pause)
+			pm_pause(2, 1);
+		for (u32 k = 0; k < 2; k++) {
+			u32 fl = hwrt_freelist(h, k);
+
+			if (fl && pm_loaded_fl[0][k] != fl)
+				pm_load_freelist(0, k, fl);
+		}
+		pm_set_pb_base();
+		if (pause)
+			pm_pause(2, 0);
 	}
-	pm_set_pb_base();
 	if (first) {
 		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 		/* PM context 0: MLIST and page catalogues of this render
@@ -729,17 +780,19 @@ void kick_frag(struct job *j)
 		pm_store_rtdata(h);	/* what the stopped TA built */
 	}
 	reg_write64(0x03D0, 0x100010100ull);
-	/* the TA is stopped mid-render: free list moves pause its allocation */
+	/* moving a list the TA context holds while a TA runs (or is
+	 * stopped mid-render for this partial render) pauses its allocation */
 	pause = 0;
 	for (u32 k = 0; k < 2; k++) {
 		u32 fl = hwrt_freelist(h, k);
 
 		if (!fl || pm_loaded_fl[1][k] == fl)
 			continue;	/* already shared by both contexts */
-		if (j->pr && !pause)
+		/* the list coming in or the one going out is also the TA's */
+		if ((pm_loaded_fl[0][k] == fl ||
+		     (pm_loaded_fl[1][k] && pm_loaded_fl[1][k] == pm_loaded_fl[0][k])) &&
+		    sched_dm_busy(DM_GEOM) && !pause)
 			pm_pause_ta_alloc(pause = 1);
-		if (pm_loaded_fl[0][k] == fl)
-			pm_store_freelist(0, k, fl);
 		pm_load_freelist(1, k, fl);
 	}
 	pm_set_pb_base();
@@ -822,6 +875,7 @@ void finish_frag(struct job *j)
 {
 	u32 h = j->hwrt;
 	int zls_wait = j->zlsctl & ISP_ZLSCTL_FORCEZSTORE;
+	int frag_done;
 
 	(void)reg_read(0x0F08);
 	/* a forced depth store must have reached memory */
@@ -830,9 +884,15 @@ void finish_frag(struct job *j)
 	/* the PM must have released the render's memory */
 	poll_reg(CR_EVENT_STATUS, EVENT_PM_3D_MEM_FREE, EVENT_PM_3D_MEM_FREE);
 	reg_write(CR_EVENT_CLEAR, EVENT_PM_3D_MEM_FREE);
-	/* PC cache invalidate, except while a TA runs and another render's
-	 * geometry output waits for its 3D pass (as the reference firmware) */
-	if (!(sched_dm_busy(DM_GEOM) && pm_pending_hwrt))
+	/*
+	 * The render target is done with the 3D unless a geometry job for
+	 * it has been kicked meanwhile. Then the page catalogue cache is
+	 * invalidated; for a layered render only when the PM asks for it
+	 * (0x3E0), as the reference firmware does.
+	 */
+	frag_done = FW32(h + OFF_HWRTDATA_STATE) == RTDATA_KICK_FRAG;
+	if (frag_done && (FW32(h + OFF_HWRTDATA_RTA_CTL_ACTIVE_RENDER_TARGETS) < 2 ||
+			  (reg_read(0x03E0) & 1)))
 		gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 	TRACE(SF_OPENFW_3D_DONE, 0x7FFFFFFFu, FW32(h + OFF_HWRTDATA_STATE));
 	reg_write(CR_EVENT_CLEAR, EVENT_PIXELBE_END_RENDER | (zls_wait ? EVENT_ZLS_FINISHED : 0));
@@ -844,6 +904,7 @@ void finish_frag(struct job *j)
 		FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) |= HWRTDATA_PARTIAL_RENDERED;
 		return;
 	}
-	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_FRAG_FINISHED;
+	if (frag_done)
+		FW32(h + OFF_HWRTDATA_STATE) = RTDATA_FRAG_FINISHED;
 	FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) &= ~HWRTDATA_HAS_LAST_GEOM;
 }

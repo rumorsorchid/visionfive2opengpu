@@ -241,12 +241,14 @@ void gpu_dm_fence(u32 dm)
  * for each data master.
  */
 #define PC_SETS 7
+/* kept across power cycles, as the reference firmware keeps its table:
+ * a context gets its set back, a new one a set never used */
 static struct {
 	u64 pc;
 	u32 refs;
 	u32 used;
-} pcset[PC_SETS];
-static u32 pcset_next;
+} pcset[PC_SETS] __attribute__((section(".persist")));
+static u32 pcset_next __attribute__((section(".persist")));
 
 static const u8 cat_index_shift[DM_COUNT] = {
 	[DM_GEOM] = 0, [DM_FRAG] = 8, [DM_CDM] = 16,
@@ -280,10 +282,15 @@ u32 memctx_activate(u32 memctx, u32 dm)
 		pcset[set].pc = pc;
 		pcset[set].used = 1;
 	} else {
-		u32 i, n;
+		u32 i, n = PC_SETS;
 
-		/* a free set, preferring one never used, then round-robin */
-		for (i = 0, n = PC_SETS; i < PC_SETS; i++) {
+		/* the set the context had (before a power cycle, say) if it is
+		 * free, else a free set, preferring one never used, then
+		 * round-robin */
+		if (set < PC_SETS && (!pcset[set].used || pcset[set].pc == pc) &&
+		    !pcset[set].refs)
+			n = set;
+		for (i = 0; n == PC_SETS && i < PC_SETS; i++) {
 			if (!pcset[i].used) {
 				n = i;
 				break;
