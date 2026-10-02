@@ -59,6 +59,21 @@ CASES = [
     ("suspend-status", "suspend", {"status_tags": 1}),
     ("multikick-status", "multikick", {"status_tags": 1}),
     ("oom-live", "oom-live", {"oom": 1}),
+    ("partial-render", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256}),
+    ("partial-render-status", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256,
+                                      "status_tags": 1}),
+    ("partial-render-twice", "oom", {"oom": 2, "fl_threshold": 0, "fl_max": 256}),
+    ("partial-render-frames", "oom-frames", {"fl_threshold": 0, "fl_max": 256}),
+    ("partial-render-busy3d", "frames-pipelined", {"oom": 3, "fl_threshold": 0, "fl_max": 256}),
+    ("partial-render-zs", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256, "override": {
+        "rogue_fwif_cmd_frag": {"flags": (1 << 7) | (1 << 8) | (1 << 19),
+                                "regs.isp_zlsctl": (1 << 15) | (1 << 19) | (1 << 14) | (1 << 18)}}}),
+    ("partial-render-zs-twice", "oom", {"oom": 2, "fl_threshold": 0, "fl_max": 256, "override": {
+        "rogue_fwif_cmd_frag": {"flags": (1 << 7) | (1 << 8)}}}),
+    ("partial-render-scratch", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256, "override": {
+        "rogue_fwif_cmd_frag": {"flags": 1 << 19, "regs.isp_ctl": 0}}}),
+    ("partial-render-msaa", "oom", {"oom": 1, "fl_threshold": 0, "fl_max": 256, "samples": 4}),
+    ("partial-render-multikick", "multikick", {"oom": 2, "fl_threshold": 0, "fl_max": 256}),
     ("oom-frames", "oom-frames", {}),
     ("oom-frames-status", "oom-frames", {"status_tags": 1}),
 ]
@@ -85,7 +100,20 @@ KERNEL_FLAGS = {"rogue_fwif_cmd_geom": (0x8, 0x3), "rogue_fwif_cmd_frag": (0x040
                 "rogue_fwif_cmd_transfer": (0xFFFFFFFF, 0)}
 
 
+PR_PARAMS = {"oom": 1, "fl_threshold": 0, "fl_max": 256}
+
+
 def sweep_cases():
+    # fragment fields through a partial render too (parameter memory exhausted)
+    for field, bits in H.STREAM_FIELDS["rogue_fwif_cmd_frag"] + [("flags", 32)]:
+        for v in SWEEP_VALUES:
+            if bits == 64:
+                v |= v << 32
+            if field == "flags":
+                mask, fixed = KERNEL_FLAGS["rogue_fwif_cmd_frag"]
+                v = (v & mask) | fixed
+            yield ("pr.cmd_frag.%s=%x" % (field, v), "oom",
+                   dict(PR_PARAMS, override={"rogue_fwif_cmd_frag": {field: v}}))
     for sname, sc in SWEEP_SCENARIO.items():
         for field, bits in H.STREAM_FIELDS[sname] + [("flags", 32)]:
             for v in SWEEP_VALUES:

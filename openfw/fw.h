@@ -59,6 +59,7 @@ static inline __attribute__((always_inline)) u64 reg_read64(u32 off)
 /* enum rogue_fwif_fwccb_cmd_type */
 #define FWCCB_FREELIST_GROW	(103u | CMD_MAGIC)
 #define FWCCB_UPDATE_STATS	(107u | CMD_MAGIC)
+#define FWCCB_STATS_NUM_PARTIAL_RENDERS 1u
 #define FWCCB_STATS_NUM_OUT_OF_MEMORY 2u
 
 #define KCCB_RTN_CMD_EXECUTED	(1u << 0)
@@ -106,6 +107,7 @@ static inline __attribute__((always_inline)) u64 reg_read64(u32 off)
 #define RTDATA_GEOM_OUTOFMEM	7u
 
 #define HWRTDATA_HAS_LAST_GEOM	(1u << 2)
+#define HWRTDATA_PARTIAL_RENDERED (1u << 3)
 
 #define GEOM_FLAGS_FIRSTKICK	(1u << 0)
 #define GEOM_FLAGS_LASTKICK	(1u << 1)
@@ -179,6 +181,8 @@ struct job {
 	u32 memctx;
 	u32 pcset;
 	u32 end;		/* client CCB offset after the command */
+	u32 pr;			/* a FRAG_PR run as a partial render (out of memory) */
+	u32 zlsctl;		/* ISP_ZLSCTL as programmed (fragment jobs) */
 };
 
 /* -- kicks.c ---------------------------------------------------------------- */
@@ -195,6 +199,8 @@ void pm_reset(void);
 void pm_unload_freelists(u32 fl);
 void pm_save(void);
 void oom_geom(struct job *j);
+void pr_finished(struct job *pr);
+void sched_request_pr(struct job *geom);
 void freelist_grow_update(u32 data);
 
 #endif

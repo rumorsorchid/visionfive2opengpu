@@ -26,10 +26,21 @@
 #define ISP_RENDER_MODE_FAST_2D		2u
 
 #define ISP_AA_MODE_MASK		3u
+#define ISP_ZLSCTL_FORCEZLOAD		(1u << 1)
 #define ISP_ZLSCTL_FORCEZSTORE		(1u << 2)
+#define ISP_ZLSCTL_SLOADEN		(1u << 14)
+#define ISP_ZLSCTL_ZLOADEN		(1u << 15)
+#define ISP_ZLSCTL_SSTOREEN		(1u << 18)
+#define ISP_ZLSCTL_ZSTOREEN		(1u << 19)
+
+#define ISP_CTL_PROCESS_EMPTY_TILES	(1u << 17)
+#define ISP_BGOBJVALS_ENABLEBGTAG	(1u << 9)
 
 /* rogue_fwif_cmd_frag.flags (pvr_rogue_fwif_client.h) */
 #define FRAG_FLAGS_GET_VIS_RESULTS	(1u << 5)
+#define FRAG_FLAGS_DEPTHBUFFER		(1u << 7)
+#define FRAG_FLAGS_STENCILBUFFER	(1u << 8)
+#define FRAG_FLAGS_SCRATCHBUFFER	(1u << 19)
 #define FRAG_FLAGS_DISABLE_PIXELMERGE	(1u << 15)
 
 #define CDM_CTX(r) OFF_FWCOMPUTECONTEXT_STATIC_COMPUTE_CONTEXT_STATE_CTXSWITCH_REGS_CDMREG_CDM_##r
@@ -243,6 +254,16 @@ static void pm_store_freelist(u32 pmctx, u32 kind, u32 fl)
 		reg_read(pm_fl_status[pmctx][kind].mmu_pages);
 }
 
+/* What PM context 1 (3D) holds of a render, back to its HWRT data. */
+static void pm_store_rtdata_3d(u32 h)
+{
+	FW32(h + OFF_HWRTDATA_PM_MLIST_STACK_POINTER) = reg_read(0x02D0);
+	fw_write64(h + OFF_HWRTDATA_PM_ALIST_STACK_POINTER, reg_read64(0x0280));
+	fw_write64(h + OFF_HWRTDATA_VCE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_VCE1));
+	fw_write64(h + OFF_HWRTDATA_TE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_TE1));
+	fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST1));
+}
+
 /*
  * Before power-off: free lists from PM context 0, the render state of the
  * HWRT data last on PM context 1 (and of a render whose 3D pass has not
@@ -255,15 +276,8 @@ void pm_save(void)
 			pm_store_freelist(0, k, pm_loaded_fl[0][k]);
 	if (pm_pending_hwrt && !pm_pending_stored)
 		pm_store_rtdata(pm_pending_hwrt);
-	if (pm_3d_hwrt) {
-		u32 h = pm_3d_hwrt;
-
-		FW32(h + OFF_HWRTDATA_PM_MLIST_STACK_POINTER) = reg_read(0x02D0);
-		fw_write64(h + OFF_HWRTDATA_PM_ALIST_STACK_POINTER, reg_read64(0x0280));
-		fw_write64(h + OFF_HWRTDATA_VCE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_VCE1));
-		fw_write64(h + OFF_HWRTDATA_TE_CAT_BASE0, reg_read64(CR_BIF_PM_CAT_BASE_TE1));
-		fw_write64(h + OFF_HWRTDATA_ALIST_CAT_BASE, reg_read64(CR_BIF_PM_CAT_BASE_ALIST1));
-	}
+	if (pm_3d_hwrt)
+		pm_store_rtdata_3d(pm_3d_hwrt);
 	for (u32 k = 0; k < 2; k++)
 		if (pm_loaded_fl[1][k])
 			pm_store_freelist(1, k, pm_loaded_fl[1][k]);
@@ -384,6 +398,40 @@ static void pm_grow_ta(u32 kind, u32 fl, u32 pages)
 	reg_write(0x0328, 1);			/* resume the TA */
 }
 
+/*
+ * Partial render (no memory left to grow): stop the TA and store its
+ * context, drain it and flush the render target cache, so that the 3D can
+ * render the tiles binned so far and free their parameter memory.
+ */
+static void pr_stop_ta(struct job *j)
+{
+	reg_write(0x0320, 1);			/* TA terminate */
+	poll_reg(CR_EVENT_STATUS, EVENT_TA_TERMINATE, EVENT_TA_TERMINATE);
+	reg_write(CR_EVENT_CLEAR, EVENT_TA_TERMINATE);
+	reg_write(0x0CF0, 1);			/* TA context store */
+	poll_reg(0x0CF0, 1, 0);
+	gpu_dm_fence(DM_GEOM);
+	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+	reg_write(0x0CB8, 2);			/* render target cache flush */
+	poll_reg(0x0CB8, 2, 0);
+	FW32(j->hwrt + OFF_HWRTDATA_STATE) = RTDATA_GEOM_OUTOFMEM;
+}
+
+/* The partial render is done: count it and restart the stopped TA. */
+void pr_finished(struct job *pr)
+{
+	fwccb_send(FWCCB_UPDATE_STATS, FWCCB_STATS_NUM_PARTIAL_RENDERS, ctx_pid(pr->ctx), 1);
+	reg_write64(0x03D0, 0x100000100ull);
+	reg_write(0x0290, 1);
+	reg_write(0x0198, 1);
+	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
+	reg_write(0x01B8, 1);			/* TA context load */
+	poll_reg(0x01B8, 1, 0);
+	reg_write(0x0328, 1);			/* resume the TA */
+	reg_write(0x0CA8, 1);
+	FW32(pr->hwrt + OFF_HWRTDATA_STATE) = RTDATA_KICK_GEOM;
+}
+
 void oom_geom(struct job *j)
 {
 	u32 h = j->hwrt;
@@ -394,6 +442,14 @@ void oom_geom(struct job *j)
 
 	reg_write(CR_EVENT_CLEAR, EVENT_PM_OUT_OF_MEMORY);
 	TRACE(SF_OPENFW_OOM, j->ctx, h);
+	if (!ready && !FW32(fl + OFF_FREELIST_GROW_PENDING) &&
+	    (!FW32(fl + OFF_FREELIST_GROW_PAGES) || cur >= FW32(fl + OFF_FREELIST_MAX_PAGES))) {
+		/* nothing left to grow: render what the TA has so far */
+		pr_stop_ta(j);
+		fwccb_send(FWCCB_UPDATE_STATS, FWCCB_STATS_NUM_OUT_OF_MEMORY, ctx_pid(j->ctx), 1);
+		sched_request_pr(j);
+		return;
+	}
 	if (ready) {
 		pm_grow_ta(kind, fl, ready);
 		cur += ready;
@@ -525,6 +581,8 @@ void kick_geom(struct job *j)
 	FW32(h + OFF_HWRTDATA_STATE) = (flags & GEOM_FLAGS_FIRSTKICK) ? RTDATA_KICK_GEOM_FIRST
 								     : RTDATA_KICK_GEOM;
 	FW32(h + OFF_HWRTDATA_GEOM_CACHES_NEED_ZEROING) = 1;
+	if (first)
+		FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) &= ~HWRTDATA_PARTIAL_RENDERED;
 	if (flags & GEOM_FLAGS_LASTKICK)
 		FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) |= HWRTDATA_HAS_LAST_GEOM;
 
@@ -575,7 +633,40 @@ void kick_frag(struct job *j)
 	u32 p = j->payload, h = j->hwrt;
 	u32 c = FW32(h + OFF_HWRTDATA_HWRT_DATA_COMMON_FW_ADDR);
 	u32 isp_ctl = FW32(p + OFF_CMD_FRAG_REGS_ISP_CTL);
+	u32 bgobjvals = FW32(p + OFF_CMD_FRAG_REGS_ISP_BGOBJVALS);
 	u32 flags = FW32(p + OFF_CMD_FRAG_FLAGS);
+	u32 bgnd = p + OFF_CMD_FRAG_REGS_PDS_BGND0;
+	int pause;
+
+	/* after a partial render the background reloads what it stored */
+	u64 zlsctl = fw_read64(p + OFF_CMD_FRAG_REGS_ISP_ZLSCTL);
+
+	/*
+	 * Partial renders: a partial render processes every tile and stores
+	 * depth/stencil; the renders after it reload colour through the PR
+	 * background program and depth/stencil from memory, and process
+	 * empty tiles only when an SPM scratch buffer holds the colour.
+	 */
+	if (FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) & HWRTDATA_PARTIAL_RENDERED) {
+		if (flags & FRAG_FLAGS_SCRATCHBUFFER)
+			isp_ctl |= ISP_CTL_PROCESS_EMPTY_TILES;
+		else
+			isp_ctl &= ~ISP_CTL_PROCESS_EMPTY_TILES;
+		bgobjvals |= ISP_BGOBJVALS_ENABLEBGTAG;
+		bgnd = p + OFF_CMD_FRAG_REGS_PDS_PR_BGND0;
+		if (flags & FRAG_FLAGS_DEPTHBUFFER)
+			zlsctl |= ISP_ZLSCTL_ZLOADEN | ISP_ZLSCTL_FORCEZLOAD;
+		if (flags & FRAG_FLAGS_STENCILBUFFER)
+			zlsctl |= ISP_ZLSCTL_SLOADEN | ISP_ZLSCTL_FORCEZLOAD;
+	} else if (j->pr) {
+		isp_ctl |= ISP_CTL_PROCESS_EMPTY_TILES;
+	}
+	if (j->pr) {
+		if (flags & FRAG_FLAGS_DEPTHBUFFER)
+			zlsctl |= ISP_ZLSCTL_ZSTOREEN | ISP_ZLSCTL_FORCEZSTORE;
+		if (flags & FRAG_FLAGS_STENCILBUFFER)
+			zlsctl |= ISP_ZLSCTL_SSTOREEN | ISP_ZLSCTL_FORCEZSTORE;
+	}
 
 	/*
 	 * Hand the geometry output over to the 3D: the HWRT data holds the
@@ -587,18 +678,26 @@ void kick_frag(struct job *j)
 		if (!pm_pending_stored)
 			pm_store_rtdata(h);
 		pm_pending_hwrt = pm_pending_stored = 0;
+	} else if (j->pr) {
+		pm_store_rtdata(h);	/* what the stopped TA built */
 	}
 	reg_write64(0x03D0, 0x100010100ull);
+	/* the TA is stopped mid-render: free list moves pause its allocation */
+	pause = 0;
 	for (u32 k = 0; k < 2; k++) {
 		u32 fl = hwrt_freelist(h, k);
 
 		if (!fl || pm_loaded_fl[1][k] == fl)
 			continue;	/* already shared by both contexts */
+		if (j->pr && !pause)
+			pm_pause_ta_alloc(pause = 1);
 		if (pm_loaded_fl[0][k] == fl)
 			pm_store_freelist(0, k, fl);
 		pm_load_freelist(1, k, fl);
 	}
 	pm_set_pb_base();
+	if (pause)
+		pm_pause_ta_alloc(0);
 	gpu_slc_mmu_flush(BIF_CTRL_INVAL_PC);
 	copy64(0x02E0, h + OFF_HWRTDATA_PM_MLIST_DEV_ADDR);
 	copy64(CR_BIF_PM_CAT_BASE_VCE1, h + OFF_HWRTDATA_VCE_CAT_BASE0);
@@ -639,21 +738,28 @@ void kick_frag(struct job *j)
 	}
 	copy64(0x1790, p + OFF_CMD_FRAG_REGS_TPU_BORDER_COLOUR_TABLE);
 	reg_write(0x0FD8, tiles_in_flight(isp_ctl));
-	copy64(0x0F48, p + OFF_CMD_FRAG_REGS_ISP_ZLSCTL);
+	reg_write64(0x0F48, zlsctl);
+	j->zlsctl = (u32)zlsctl;
 	reg_write(0x0F38, isp_ctl);
-	copy32(0x0F88, p + OFF_CMD_FRAG_REGS_ISP_BGOBJVALS);
+	reg_write(0x0F88, bgobjvals);
 	copy64(0x0F50, p + OFF_CMD_FRAG_REGS_ISP_ZLOAD_STORE_BASE);
 	copy64(0x0F58, p + OFF_CMD_FRAG_REGS_ISP_ZLOAD_STORE_BASE);
 	copy64(0x0F60, p + OFF_CMD_FRAG_REGS_ISP_STENCIL_LOAD_STORE_BASE);
 	copy64(0x0F68, p + OFF_CMD_FRAG_REGS_ISP_STENCIL_LOAD_STORE_BASE);
-	reg_write(0x06D0, (flags & FRAG_FLAGS_DISABLE_PIXELMERGE) ? 0x7F : 0x1F);
-	copy64(0x06A0, p + OFF_CMD_FRAG_REGS_PDS_BGND0);
-	copy64(0x06A8, p + OFF_CMD_FRAG_REGS_PDS_BGND1);
-	copy64(0x06B8, p + OFF_CMD_FRAG_REGS_PDS_BGND2);
+	/* pixel merging off when asked, and for a partial render that stores
+	 * depth/stencil (bit 5) */
+	reg_write(0x06D0, (flags & FRAG_FLAGS_DISABLE_PIXELMERGE) ? 0x7F :
+			  (j->pr && (flags & (FRAG_FLAGS_DEPTHBUFFER | FRAG_FLAGS_STENCILBUFFER))) ?
+			  0x3F : 0x1F);
+	copy64(0x06A0, bgnd);
+	copy64(0x06A8, bgnd + 8);
+	copy64(0x06B8, bgnd + 16);
+	if (j->pr)
+		reg_write(0x0338, 1);		/* PM_PARTIAL_RENDER_ENABLE */
 	reg_write(0x0388, 1);
 	reg_write(0x03D8, 0);
 	reg_write(0x03E0, 1);
-	reg_write(0x01C0, 0);
+	reg_write(0x01C0, j->pr ? 1 : 0);
 	reg_write(0x0298, 0);
 	reg_write(0x01C8, 0);
 
@@ -668,7 +774,7 @@ void kick_frag(struct job *j)
 void finish_frag(struct job *j)
 {
 	u32 h = j->hwrt;
-	int zls_wait = FW32(j->payload + OFF_CMD_FRAG_REGS_ISP_ZLSCTL) & ISP_ZLSCTL_FORCEZSTORE;
+	int zls_wait = j->zlsctl & ISP_ZLSCTL_FORCEZSTORE;
 
 	(void)reg_read(0x0F08);
 	/* a forced depth store must have reached memory */
@@ -684,6 +790,13 @@ void finish_frag(struct job *j)
 	TRACE(SF_OPENFW_3D_DONE, 0x7FFFFFFFu, FW32(h + OFF_HWRTDATA_STATE));
 	reg_write(CR_EVENT_CLEAR, EVENT_PIXELBE_END_RENDER | (zls_wait ? EVENT_ZLS_FINISHED : 0));
 	gpu_dm_fence(DM_FRAG);
+	if (j->pr) {
+		reg_write(0x0338, 0);
+		/* the render continues: keep what the 3D left of it */
+		pm_store_rtdata_3d(h);
+		FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) |= HWRTDATA_PARTIAL_RENDERED;
+		return;
+	}
 	FW32(h + OFF_HWRTDATA_STATE) = RTDATA_FRAG_FINISHED;
-	FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) = 0;
+	FW32(h + OFF_HWRTDATA_HWRT_DATA_FLAGS) &= ~HWRTDATA_HAS_LAST_GEOM;
 }

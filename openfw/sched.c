@@ -26,6 +26,11 @@ static u32 ready[MAX_READY];
 static u32 nready;
 static struct job running[DM_COUNT];
 
+/* a partial render to run on the 3D pipe (see spm_try) */
+static struct {
+	u32 geom_ctx, hwrt, fence_addr, fence_value;
+} spm;
+
 static const u32 hdr_size = SIZEOF_CCB_CMD_HEADER;
 
 static int ctx_is_ready(u32 ctx)
@@ -76,6 +81,7 @@ int sched_idle(void)
 void sched_reset(void)
 {
 	nready = 0;
+	spm.hwrt = 0;
 	for (u32 dm = 0; dm < DM_COUNT; dm++)
 		running[dm].ctx = 0;
 }
@@ -194,12 +200,13 @@ static u32 cmd_hwrt(u32 type, u32 payload)
 	return 0;
 }
 
-static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type)
+static int start_job(u32 ctx, struct cccb *c, u32 off, u32 type, u32 pr)
 {
 	u32 dm = job_dm(type);
 	struct job *j = &running[dm];
 
 	j->ctx = ctx;
+	j->pr = pr;
 	j->cmd = c->ccb + off;
 	j->type = type;
 	j->payload = j->cmd + hdr_size;
@@ -314,7 +321,7 @@ static int process(u32 ctx)
 		case CCB_GEOM:
 		case CCB_FRAG:
 			set_read(&c, off);
-			if (running[job_dm(t)].ctx || !start_job(ctx, &c, off, t))
+			if (running[job_dm(t)].ctx || !start_job(ctx, &c, off, t, 0))
 				return progress;
 			return 1;
 		default:
@@ -405,6 +412,70 @@ void sched_kick(u32 k)
 	ready_add(ctx);
 }
 
+/* -- partial renders ------------------------------------------------------------------ */
+
+/*
+ * A TA that ran out of parameter memory with no way to grow it has been
+ * stopped (kicks.c); its render's partial-render command (FRAG_PR, in the
+ * fragment context of the same render context) now runs on the 3D pipe to
+ * free memory, ahead of anything else there. The paired geometry job's
+ * done fence among its FENCE_PRs is ignored: that is the geometry being
+ * rendered. The command stays in the client CCB; once the geometry
+ * finishes it is consumed like any partial-render command that is not
+ * needed.
+ */
+static int spm_try(void)
+{
+	u32 frag = spm.geom_ctx + OFF_FWRENDERCONTEXT_FRAG_CONTEXT;
+	struct cccb c;
+	u32 off;
+
+	if (!spm.hwrt || running[DM_FRAG].ctx)
+		return 0;
+	/* the queue's previous geometry job is done (pvr_queue.c) */
+	if (!ufo_satisfied(spm.fence_addr, spm.fence_value))
+		return 0;
+	cccb_open(frag, &c);
+	off = FW32(c.ctl + OFF_CCCB_CTL_READ_OFFSET);
+	while (off != c.woff) {
+		u32 t = cmd_type(&c, off), p = c.ccb + off + hdr_size;
+
+		switch (t) {
+		case CCB_PADDING:
+			off = 0;
+			continue;
+		case CCB_FENCE:
+		case CCB_FENCE_PR:
+			for (u32 u = p; u + 8 <= p + cmd_size(&c, off); u += 8)
+				if (FW32(u) != spm.fence_addr && !ufo_satisfied(FW32(u), FW32(u + 4)))
+					return 0;
+			break;
+		case CCB_UPDATE:
+		case CCB_UNFENCED_UPDATE:
+			break;
+		case CCB_FRAG_PR:
+			if (cmd_hwrt(t, p) != spm.hwrt)
+				return 0;
+			spm.hwrt = 0;
+			start_job(frag, &c, off, t, 1);
+			return 1;
+		default:
+			return 0;	/* behind another job */
+		}
+		off = cmd_next(&c, off);
+	}
+	return 0;
+}
+
+void sched_request_pr(struct job *g)
+{
+	spm.geom_ctx = g->ctx;
+	spm.hwrt = g->hwrt;
+	spm.fence_addr = FW32(g->payload + OFF_CMD_GEOM_PARTIAL_RENDER_GEOM_FRAG_FENCE_ADDR);
+	spm.fence_value = FW32(g->payload + OFF_CMD_GEOM_PARTIAL_RENDER_GEOM_FRAG_FENCE_VALUE);
+	spm_try();
+}
+
 /* -- completion ------------------------------------------------------------------------ */
 
 static void complete(u32 dm)
@@ -414,6 +485,13 @@ static void complete(u32 dm)
 
 	if (!j->ctx)
 		return;
+	if (j->pr) {
+		/* the command stays in the CCB; the stopped TA restarts */
+		memctx_deactivate(j->memctx, dm);
+		pr_finished(j);
+		j->ctx = 0;
+		return;
+	}
 	cccb_open(j->ctx, &c);
 	set_read(&c, run_updates(&c, j->end));
 	if (j->hwrt && j->type != CCB_FRAG_PR) {
@@ -464,6 +542,8 @@ void sched_irq(void)
 			break;
 		}
 		complete(dm);
+		if (dm == DM_FRAG)
+			spm_try();		/* a partial render waits for the 3D */
 		run_dm(dm);
 		if (dm == DM_FRAG && !running[DM_FRAG].ctx)
 			reg_write(0x6300, 1);	/* the 3D pipe goes idle */
