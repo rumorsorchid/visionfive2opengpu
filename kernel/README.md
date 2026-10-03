@@ -1,8 +1,28 @@
 # Kernel patch series: VisionFive 2 GPU + HDMI on Linux v7.3-rc5
 
 `patches/` applies with `git am` on top of **v7.3-rc5**
-(`72d3fcf802c4`). `build.sh` clones, patches, configures with
-`config/vf2-gpu-hdmi.config` and builds Debian packages.
+(`72d3fcf802c4`). `build.sh` clones, patches, configures with the
+fragments in `config/` and builds Debian packages:
+
+* `vf2-gpu-hdmi.config`: the GPU and HDMI stack;
+* `vf2-libre-desktop.config`: no drivers that load non-free firmware,
+  plus desktop options (FUSE, exFAT/NTFS, zram, USB audio, game
+  controllers with uinput/hidraw, SysRq).
+
+## Blob-free
+
+Mainline Linux ships no firmware files, but drivers request them at
+runtime. `blob-audit.sh`, which `build.sh` runs after every build, checks
+what was linked: every member of `vmlinux.a` and every module in
+`modules.order` that calls a firmware loader, plus every declared firmware
+name. Only powervr may load firmware, and on this board that is openfw.
+The devlink and ethtool flash commands are also allowed, because they
+write only a file the user names. The riscv `defconfig` alone fails the
+audit: radeon, nouveau, r8169, and the Realtek and Microsemi PHY drivers
+request non-free microcode, so `vf2-libre-desktop.config` turns them off.
+None of that hardware is on the VisionFive 2. linux-libre itself is not
+used: its deblobbing blocks the PowerVR firmware by file name, which here
+is the open firmware.
 
 ## Verification done for this series
 
@@ -10,7 +30,8 @@ On an x86_64 host with `riscv64-linux-gnu-gcc` 13.3:
 
 | Check | Result |
 |---|---|
-| `defconfig` + fragment, `make Image modules dtbs` | builds; every fragment line survives `olddefconfig` |
+| `defconfig` + fragments, `make Image modules dtbs` | builds; every fragment line survives `olddefconfig`, every disabled symbol stays off |
+| `blob-audit.sh` on that build | clean: only powervr (openfw) can load firmware |
 | `make W=1 drivers/gpu/drm/imagination/` | clean (after patch 41) |
 | `dt_binding_check DT_SCHEMA_FILES=gpu/img,powervr-rogue.yaml` | passes, incl. the new JH7110 example |
 | Binding negative tests (JH7110 node with 3 clocks / 1 reset; TI node with 5 clocks) | rejected as intended |

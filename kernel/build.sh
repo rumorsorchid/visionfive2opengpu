@@ -51,12 +51,22 @@ fi
 
 mkdir -p "$OUT"
 $MAKE defconfig
+# vf2-gpu-hdmi.config: GPU + HDMI stack; vf2-libre-desktop.config: no
+# drivers that load non-free firmware, plus desktop options.
 "$SRC"/scripts/kconfig/merge_config.sh -m -O "$OUT" "$OUT/.config" \
-	"$HERE/config/vf2-gpu-hdmi.config"
+	"$HERE"/config/*.config
 $MAKE olddefconfig
 
-# Fail early if a fragment symbol did not survive (renamed or unmet deps).
-missing=$(grep '^CONFIG_' "$HERE/config/vf2-gpu-hdmi.config" | grep -vxF -f "$OUT/.config" || true)
+# Fail early if a fragment symbol did not survive (renamed or unmet deps),
+# or if something re-enabled a symbol a fragment turns off.
+missing=$(cat "$HERE"/config/*.config | grep '^CONFIG_' | grep -vxF -f "$OUT/.config" || true)
+# shellcheck disable=SC2013  # one symbol per line
+for sym in $(cat "$HERE"/config/*.config | sed -n 's/^# \(CONFIG_[A-Z0-9_]*\) is not set$/\1/p'); do
+	if grep -q "^$sym=" "$OUT/.config"; then
+		missing="$missing
+$sym (should be off)"
+	fi
+done
 if [ -n "$missing" ]; then
 	echo "config fragment lines not applied:" >&2
 	echo "$missing" >&2
@@ -64,6 +74,7 @@ if [ -n "$missing" ]; then
 fi
 
 $MAKE Image modules dtbs
+"$HERE/blob-audit.sh" "$OUT"
 # Cross builds skip linux-headers: it would need the target's libssl/libelf.
 if [ -n "$CROSS" ]; then
 	DEB_BUILD_PROFILES=pkg.linux-upstream.nokernelheaders $MAKE bindeb-pkg
