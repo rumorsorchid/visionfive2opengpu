@@ -23,8 +23,8 @@ rest on a real board.
 |---|---|---|
 | HDMI display (DC8200 + Inno HDMI) | works with the on-list series | `kernel/patches` 1–21, 26 |
 | Cache coherency (U74 has no Svpbmt) | fixed by Bo Gan's XPbmtUC errata | patches 22–25 |
-| GPU kernel driver | runs Vulkan/Zink; BXE-4-32 now a proper *experimental* core with DT binding | patches 27–41 |
-| Rascal/dust power-up | firmware-derived host sequence; vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
+| GPU kernel driver | runs Vulkan/Zink; BXE-4-32 now a proper *experimental* core with DT binding | patches 27–41, 43–44 |
+| Rascal/dust power-up | the community's board-tested single write by default; firmware-derived sequence and vendor-style `rd_power_island` path to test | [docs/power.md](docs/power.md) |
 | Mesa | 26.1+ supports BXE-4-32, non-conformant (`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`) | [board/cts.md](board/cts.md) |
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
 | Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth and partial renders, hardware recovery, suspend/resume); matches Imagination's firmware register for register in 83 emulated cases, 638 field sweeps and 160 random desktop-like workloads, with no use of freed memory; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
