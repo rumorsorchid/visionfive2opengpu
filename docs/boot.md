@@ -35,19 +35,21 @@ still being scanned out.
    With a `booti`/extlinux boot (Debian's `u-boot-menu`) there is no early
    framebuffer: the screen keeps U-Boot's last picture, which is safe
    because that RAM is reserved.
-2. **`late_initcall`.** The kernel turns off clocks and power domains that
-   no driver has claimed. The display drivers are modules
-   (`verisilicon-dc`, `jh7110-inno-hdmi`, `phy-jh7110-inno-hdmi`), so they
-   have not claimed them yet: the screen goes **dark for a few seconds**.
-   This is expected.
-3. **The display driver loads.** `verisilicon-dc` removes the firmware
-   framebuffer (`aperture_remove_all_conflicting_devices`) and sets the
-   monitor's preferred mode. The console comes back.
+2. **The display drivers probe.** `verisilicon-dc`, the HDMI bridge and
+   PHY, the VOUT clock controller and the VOUT/HDMI subsystem drivers are
+   built into the kernel (`config/vf2-gpu-hdmi.config`, as in the
+   community bring-up's tested configuration). They take over the display
+   early in boot, claim their clocks and power domain before the
+   `late_initcall` that switches unused ones off, remove the firmware
+   framebuffer (`aperture_remove_all_conflicting_devices`) and set the
+   monitor's preferred mode. Kernel messages then appear on HDMI. Allow a
+   short blank while the mode is set.
 
-To shorten the dark gap, load the display modules from the initramfs
-(the VOUT clock controller and subsystem drivers first: the display
-driver needs them but does not depend on them by symbol, so
-initramfs-tools would not pull them in by itself):
+With a kernel that has these drivers as modules, the screen goes dark
+for a few seconds at `late_initcall` instead, until the modules load. Load
+them from the initramfs (the VOUT clock controller and subsystem drivers
+first: the display driver needs them but does not depend on them by
+symbol, so initramfs-tools would not pull them in by itself):
 
 ```sh
 printf '%s\n' clk-starfive-jh7110-vout jh7110-vout-subsystem jh7110-hdmi-subsystem \
@@ -121,9 +123,11 @@ and power domain on, so use it only to debug.
    through Zink). The image in [`image/`](../image/README.md) sets it up
    (`vf2-session`). `board/bench.sh wayland` runs vkmark and glmark2 inside
    such a session.
-5. **Memory.** The config fragment reserves 256 MiB of CMA for scanout
-   buffers. Raise it with `cma=` on the command line for several 4K
-   buffers.
+5. **Memory.** The VisionFive 2 device tree reserves 512 MiB of CMA
+   below 4 GiB (`linux,cma`), where the DC8200 can reach it; it overrides
+   the config fragment's 256 MiB. The community saw `cma=64M` fail with
+   `fbdev: Failed to setup emulation (ret=-12)` and no HDMI output; keep
+   at least 128 MiB if you override it.
 
 ## What to expect: games, emulators, local LLMs
 
@@ -162,7 +166,8 @@ work that shows no progress at all.
 * **No picture in U-Boot:** stop autoboot and run `hdmitest` (driver
   profiles) and `hdmiregs`, as the driver suggests.
 * **Picture in U-Boot, black for good after the kernel starts:** check that
-  `verisilicon-dc` loaded (`lsmod`, `dmesg | grep -i verisilicon`) and that the
+  `verisilicon-dc` probed (`dmesg | grep -i verisilicon`; built in, so
+  not in `lsmod`) and that the
   DTB is the v1.3b one from the kernel package (`install-kernel.sh` wires
   it up).
 * **GPU problems:** `sudo board/vf2-gpu-check.sh --run` collects the state.

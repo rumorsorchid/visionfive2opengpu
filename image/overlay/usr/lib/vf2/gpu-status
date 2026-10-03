@@ -7,6 +7,7 @@ gpu) text="GPU: PowerVR"; class=ok ;;
 software) text="GPU: software"; class=warning ;;
 *) text="GPU: ?"; class=warning ;;
 esac
+[ "$st" = warn ] && [ "$class" = ok ] && class=warning
 [ "$st" = fail ] && class=critical
 printf '{"text": "%s", "tooltip": "compositing: %s\\nfirst-boot self-test: %s\\nclick: welcome / test report", "class": "%s"}\n' \
 	"$text" "${VF2_RENDER_MODE:-unknown}" "$st" "$class"

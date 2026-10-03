@@ -183,10 +183,20 @@ OpenBSD install) can still win.
    compositor renderer, vkcube, vkmark and glmark2 windowed, Zink on
    Wayland and X11).
 
-If the self-test fails, the desktop composites in software, so you can
-still read the reports. If the board hangs during the self-test, switch it
-off and on: the second boot sees the unfinished run, skips it, marks the
-GPU as failed and starts the desktop in software.
+The result is one of three:
+* **ok**: all checks passed.
+* **warn**: the GPU and firmware work, but an application check failed.
+  For example, the community has seen vkmark stop with
+  `ErrorOutOfDeviceMemory` in Mesa's still-experimental PowerVR driver.
+  The desktop still uses the GPU, and the report names the failing check.
+* **fail**: a firmware-level problem, such as the driver or firmware not
+  coming up, GPU jobs timing out or hanging, firmware resets, or no Vulkan
+  device. The desktop then composites in software, so you can still read
+  the reports.
+
+If the board hangs during the self-test, switch it off and on: the second
+boot sees the unfinished run, skips it, marks the GPU as failed and starts
+the desktop in software.
 
 ## 6. Using it
 

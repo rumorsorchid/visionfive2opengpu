@@ -15,8 +15,9 @@
 #                               first boot, before the desktop starts
 #
 # Reports: /var/log/vf2/ (summary in selftest-summary.txt). The result
-# (ok, fail or skipped) goes to /var/lib/vf2/gpu-status, which the desktop
-# session reads: after a failed self-test it composites in software.
+# goes to /var/lib/vf2/gpu-status: ok, warn (the GPU works, some
+# application checks failed), fail (firmware-level problem: the desktop
+# session then composites in software) or skipped.
 # Add vf2.selftest=0 to the kernel command line to skip the boot run.
 
 set -u
@@ -128,19 +129,35 @@ else
 	fails=$((fails + 1))
 fi
 
+# Only firmware-level problems make the desktop composite in software:
+# the driver or firmware not coming up, GPU jobs that time out, hang or
+# reset the firmware, no Vulkan device, no coherent memory. A failing
+# application on a healthy GPU (Mesa's PowerVR driver is still marked
+# experimental; the community has seen vkmark stop with
+# ErrorOutOfDeviceMemory) is reported, and the GPU stays in use; labwc
+# falls back to software by itself if Zink cannot start.
+critical=$(grep -E '^FAIL ' "$summary" | grep -E \
+	'XPbmtUC|no render node|no GPU device|not enumerated|timeouts / FW resets|no powervr render node|did not report the openfw version|firmware failed to boot|modprobe powervr|runtime_status=[a-z]* after resume|reported a firmware problem|\(exit 124,|, [1-9][0-9]* timeout/reset messages|did not finish' || true)
+if grep -q 'something has a render node open' "$LOGDIR"/openfw-jobs-"$stamp".txt 2>/dev/null; then
+	say "the GPU was busy: log out of the desktop, or use: sudo vf2-selftest --quick"
+	# a busy GPU says nothing about the stack: keep the previous result
+	rm -f "$STATE/selftest-started"
+	exit 1
+fi
 if [ "$fails" = 0 ]; then
 	echo "RESULT: all checks passed" >>"$summary"
 	say "all checks passed; report: $summary"
 	finish ok
+elif [ -z "$critical" ]; then
+	echo "RESULT: the GPU works; $fails non-critical check(s) failed (applications, not the firmware); details in $LOGDIR" >>"$summary"
+	say "the GPU works; $fails non-critical check(s) failed; report: $summary"
+	finish warn
 else
-	echo "RESULT: $fails failed check(s); details in $LOGDIR" >>"$summary"
-	say "$fails failed check(s); report: $summary"
-	if grep -q 'something has a render node open' "$LOGDIR"/openfw-jobs-"$stamp".txt 2>/dev/null; then
-		say "the GPU was busy: log out of the desktop, or use: sudo vf2-selftest --quick"
-		# a busy GPU says nothing about the stack: keep the previous result
-		rm -f "$STATE/selftest-started"
-		exit 1
-	fi
+	{
+		echo "RESULT: GPU problem; the desktop composites in software. Critical:"
+		echo "$critical" | sed 's/^/  /'
+	} >>"$summary"
+	say "GPU problem ($fails failed check(s)); the desktop will composite in software; report: $summary"
 	finish fail
 fi
 # The boot run never fails the unit; a manual run reports through its status.
