@@ -215,7 +215,7 @@ has the same.
 On a Debian or Ubuntu x86_64 machine (or a riscv64 one), as root:
 
 ```sh
-apt install mmdebstrap debian-archive-keyring arch-test qemu-user-static fdisk e2fsprogs pigz \
+apt install mmdebstrap debian-archive-keyring arch-test qemu-user-static fdisk e2fsprogs pigz build-essential \
             gcc-riscv64-linux-gnu bc bison flex kmod libssl-dev libelf-dev libdw-dev rsync debhelper dpkg-dev
 ./kernel/build.sh                                  # kernel debs in ./, with the blob audit
 image/build.sh --kernel-debs .                     # out/vf2-debian-sid-<date>.img.gz
