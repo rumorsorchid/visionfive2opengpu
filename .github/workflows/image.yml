@@ -92,6 +92,18 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" /mnt/work/out
           ls -la /mnt/work/out /mnt/work/out/debs
 
+      # Everything up to the board drivers: U-Boot standard boot finds the
+      # image, first boot, services, autologin into labwc. A failure here
+      # stops the release.
+      - name: Boot test in QEMU (mainline U-Boot standard boot)
+        run: |
+          sudo apt-get install -y --no-install-recommends qemu-system-misc opensbi \
+            python3-setuptools python3-pyelftools swig python3-dev uuid-dev libgnutls28-dev
+          ub=$(image/qemu-uboot.sh /mnt/work/qemu-uboot | tail -n 1)
+          mkdir -p /mnt/work/out/qemu
+          TMPDIR=/mnt/work/tmp python3 image/qemu-test.py /mnt/work/out/*.img.gz \
+            --uboot "$ub" --out /mnt/work/out/qemu | tee /mnt/work/out/qemu-test.txt
+
       - name: Release notes
         id: notes
         run: |
@@ -112,7 +124,15 @@ jobs:
             echo '```'
             cat "$name.build-info"
             echo '```'
+            echo
+            echo "QEMU boot test (mainline U-Boot standard boot, everything up to the board drivers):"
+            echo
+            echo '```'
+            grep -E '^(PASS|FAIL)' qemu-test.txt
+            echo '```'
           } > notes.md
+          mv qemu-test.txt "$name.qemu-test.txt"
+          mv qemu/qemu-screen.png "$name.qemu-screen.png" 2>/dev/null || true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -127,4 +147,6 @@ jobs:
             /mnt/work/out/*.img.gz.sha256
             /mnt/work/out/*.packages
             /mnt/work/out/*.build-info
+            /mnt/work/out/*.qemu-test.txt
+            /mnt/work/out/*.qemu-screen.png
             /mnt/work/out/debs/*.deb

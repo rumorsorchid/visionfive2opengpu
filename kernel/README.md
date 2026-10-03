@@ -24,6 +24,15 @@ None of that hardware is on the VisionFive 2. linux-libre itself is not
 used: its deblobbing blocks the PowerVR firmware by file name, which here
 is the open firmware.
 
+## Patch 42: virtio-gpu (QEMU)
+
+v7.3-rc5's virtio-gpu creates the cursor plane's "pixel blend mode"
+property twice. Reading the first copy fails with -EINVAL, which makes
+wlroots 0.20 refuse to start on QEMU. Patch 42 drops the duplicate. It
+does not affect the VisionFive 2's display driver (verisilicon-dc
+creates the property once); it lets `image/qemu-test.py` boot the image
+into labwc.
+
 ## Verification done for this series
 
 On an x86_64 host with `riscv64-linux-gnu-gcc` 13.3:

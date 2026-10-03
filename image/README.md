@@ -48,6 +48,8 @@ first (`passwd`).
   ([`.github/workflows/image.yml`](../.github/workflows/image.yml)) with the
   same script. Debian packages that are missing for riscv64 fail that build,
   except for the optional ones listed in each release's `.build-info`.
+  Each image must pass the same QEMU boot test before it is published. The
+  results and a screenshot are attached to the release.
 * Nobody has booted the image on a VisionFive 2 yet. QEMU cannot emulate
   the JH7110, its HDMI or its GPU. The first boot runs the GPU tests
   before the desktop starts, so the first boot tells you how it went.
@@ -235,7 +237,7 @@ apt install mmdebstrap debian-archive-keyring arch-test qemu-user-static fdisk e
             gcc-riscv64-linux-gnu bc bison flex kmod libssl-dev libelf-dev libdw-dev rsync debhelper dpkg-dev
 ./kernel/build.sh                                  # kernel debs in ./, with the blob audit
 image/build.sh --kernel-debs .                     # out/vf2-debian-sid-<date>.img.gz
-image/qemu-test.py out/*.img.gz --uboot u-boot.bin # optional boot test (U-Boot: see the script)
+image/qemu-test.py out/*.img.gz --uboot "$(image/qemu-uboot.sh | tail -n 1)"   # boot test
 ```
 
 `image/build.sh --help` lists the options: user, password, host name,

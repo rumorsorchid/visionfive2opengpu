@@ -1,0 +1,43 @@
+From b1808e0df23124336f71ea2fcf2ab57582ff276b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Oct 2026 11:17:29 +0000
+Subject: [PATCH 42/42] drm/virtio: Create the cursor plane's blend mode property
+ once
+
+virtio_gpu_plane_init() creates the "pixel blend mode" property of the
+cursor plane twice: once next to the damage-clips setup and once in the
+block added by commit 6947b78df4d2 ("drm/virtio: Add pixel blend mode
+property to cursor plane"). Both properties end up attached to the
+plane, but plane->blend_mode_property only points to the second one, so
+drm_atomic_plane_get_property() rejects the first with -EINVAL and
+DRM_IOCTL_MODE_OBJ_GETPROPERTIES fails for the whole cursor plane.
+
+wlroots 0.20 enables DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, sees the
+cursor plane, fails to read its properties and refuses to start, so no
+wlroots compositor runs on virtio-gpu (QEMU) with this kernel.
+
+Drop the earlier, duplicate call; the remaining one checks for errors.
+
+Fixes: 6947b78df4d2 ("drm/virtio: Add pixel blend mode property to cursor plane")
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/virtio/virtgpu_plane.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/virtio/virtgpu_plane.c b/drivers/gpu/drm/virtio/virtgpu_plane.c
+index b422eba42a..11771c943e 100644
+--- a/drivers/gpu/drm/virtio/virtgpu_plane.c
++++ b/drivers/gpu/drm/virtio/virtgpu_plane.c
+@@ -611,9 +611,6 @@ struct drm_plane *virtio_gpu_plane_init(struct virtio_gpu_device *vgdev,
+ 
+ 	if (type == DRM_PLANE_TYPE_PRIMARY)
+ 		drm_plane_enable_fb_damage_clips(plane);
+-	else if (type == DRM_PLANE_TYPE_CURSOR)
+-		drm_plane_create_blend_mode_property(plane,
+-						     BIT(DRM_MODE_BLEND_PREMULTI));
+ 
+ 	if (type == DRM_PLANE_TYPE_CURSOR) {
+ 		/*
+-- 
+2.43.0
+
