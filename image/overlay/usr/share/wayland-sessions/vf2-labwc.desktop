@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=labwc (VisionFive 2 GPU)
+Comment=labwc with GPU compositing on the PowerVR BXE-4-32
+Exec=vf2-session
+Type=Application
+DesktopNames=labwc;wlroots

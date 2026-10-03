@@ -1,0 +1,3 @@
+# Environment of the labwc session. Keyboard layout, for example:
+# XKB_DEFAULT_LAYOUT=de
+# XKB_DEFAULT_OPTIONS=compose:ralt

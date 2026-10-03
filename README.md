@@ -29,6 +29,7 @@ rest on a real board.
 | GPU firmware | Imagination binary; v1.1 b6976702 recommended | [firmware/](firmware/README.md) |
 | Open firmware | **openfw**: MIT firmware that runs compute, transfer, geometry and fragment jobs (fences, priorities, concurrent work, parameter-buffer growth and partial renders, hardware recovery, suspend/resume); matches Imagination's firmware register for register in 83 emulated cases, 638 field sweeps and 160 random desktop-like workloads, with no use of freed memory; needs a board run | [openfw/](openfw/README.md), [docs/firmware.md](docs/firmware.md), [tools/fwemu](tools/fwemu/README.md) |
 | Boot / handoff | U-Boot HDMI framebuffer handed to Linux via EFI GOP and reserved memory; Debian sid checklist | [docs/boot.md](docs/boot.md) |
+| Flashable image | Debian sid (main only) + blob-free kernel + openfw + Mesa + labwc + Firefox + first-boot GPU self-test; built by CI, boot-tested in QEMU; needs a board run | [image/](image/README.md) |
 | OpenBSD | roadmap + first patch (uncached DRAM alias) | [docs/openbsd.md](docs/openbsd.md) |
 
 Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
@@ -37,6 +38,12 @@ Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
 [domibel/visionfive2_gpu_bringup](https://github.com/domibel/visionfive2_gpu_bringup).
 
 ## Quick start
+
+The fastest way: write the flashable Debian sid image from the
+[releases](https://github.com/rumorsorchid/visionfive2opengpu/releases) to the NVMe
+drive (or an SD card) and boot. [image/README.md](image/README.md) explains
+how, including from OpenBSD. Everything below is the manual route, for
+an existing Debian or Ubuntu installation.
 
 On an x86_64 (or riscv64) build host:
 

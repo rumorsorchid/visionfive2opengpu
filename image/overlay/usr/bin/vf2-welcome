@@ -1,0 +1,61 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# vf2-welcome - first-login screen of the VisionFive 2 image: the GPU
+# self-test result, the default password warning and where things are.
+#
+#   vf2-welcome                open the welcome terminal
+#   vf2-welcome --first-login  the same, once per user (labwc autostart)
+#   vf2-welcome --show         print it (used inside the terminal)
+
+# shellcheck disable=SC2016  # expanded by the inner shell
+state=${XDG_STATE_HOME:-$HOME/.local/state}
+case ${1:-} in
+--first-login)
+	[ -e "$state/vf2-welcome-done" ] && exit 0
+	mkdir -p "$state" && touch "$state/vf2-welcome-done"
+	sleep 2
+	exec foot -T "Welcome" -W 100x40 sh -c 'vf2-welcome --show; exec "${SHELL:-/bin/bash}"' ;;
+--show) ;;
+*) exec foot -T "Welcome" -W 100x40 sh -c 'vf2-welcome --show; exec "${SHELL:-/bin/bash}"' ;;
+esac
+
+cat <<EOF
+  VisionFive 2: Debian sid on the open GPU stack
+  ==============================================
+  kernel $(uname -r) (blob-free build), GPU firmware: openfw
+  desktop compositing: ${VF2_RENDER_MODE:-unknown}${VF2_FALLBACK:+ (fell back to software; see ~/.local/state/vf2-session.log)}
+
+EOF
+
+echo "  First-boot GPU self-test ($(cat /var/lib/vf2/gpu-status 2>/dev/null || echo 'not run')):"
+if [ -r /var/log/vf2/selftest-summary.txt ]; then
+	grep -E '^(RESULT|FAIL|SKIP)' /var/log/vf2/selftest-summary.txt | sed 's/^/    /' | head -n 20
+	echo "    full report: /var/log/vf2/"
+else
+	echo "    no report (see: systemctl status vf2-selftest)"
+fi
+
+cat <<'EOF'
+
+  The default login is vf2 / vf2, and SSH is on. Change the password now:
+      passwd
+
+  Super+Enter terminal     Super+D / Super+Space applications
+  Super+B     browser      right-click the desktop: menu (GPU tests, logout)
+
+  GPU tests in the desktop:      vf2-desktop-test
+  Full GPU job test (no desktop): sudo vf2-selftest   (log out first)
+  Benchmarks:                     /usr/lib/vf2/board/bench.sh wayland
+  Stack report for bug reports:   sudo /usr/lib/vf2/board/vf2-gpu-check.sh --run
+  Software compositing instead:   set VF2_RENDERER=pixman in /etc/default/vf2-desktop
+
+EOF
+if [ -t 0 ]; then
+	printf '  Run the on-screen GPU test now (about a minute)? [Y/n] '
+	read -r a
+	case $a in
+	[nN]*) ;;
+	*) echo; vf2-desktop-test ;;
+	esac
+fi

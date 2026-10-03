@@ -1,0 +1,39 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# firstboot - one-time setup on the first boot of the VisionFive 2 image
+# (vf2-firstboot.service):
+#   * move the backup GPT to the end of the disk and grow the root
+#     partition and filesystem to fill it (the image is smaller than any
+#     NVMe drive it gets written to);
+#   * create this machine's SSH host keys (the image ships none).
+
+set -u
+say() { echo "vf2-firstboot: $*"; }
+
+root=$(findmnt -n -o SOURCE /)
+part=${root##*/}
+disk=/dev/$(lsblk -n -o PKNAME "$root" 2>/dev/null | head -n 1)
+num=$(cat "/sys/class/block/$part/partition" 2>/dev/null || true)
+
+if [ -b "$disk" ] && [ -n "$num" ]; then
+	say "growing $root (partition $num of $disk) to fill the disk"
+	sfdisk --no-reread --no-tell-kernel --relocate gpt-bak-std "$disk" >/dev/null 2>&1 ||
+		say "could not move the backup GPT (continuing)"
+	if out=$(growpart "$disk" "$num" 2>&1); then
+		say "$out"
+	else
+		case $out in
+		NOCHANGE*) say "partition already fills the disk" ;;
+		*) say "growpart failed: $out" ;;
+		esac
+	fi
+	resize2fs "$root" 2>&1 | sed 's/^/vf2-firstboot: /'
+else
+	say "root $root is not a partition on a disk; not resizing"
+fi
+
+ssh-keygen -A >/dev/null 2>&1 && say "created SSH host keys"
+
+mkdir -p /var/lib/vf2
+touch /var/lib/vf2/firstboot-done

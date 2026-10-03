@@ -1,0 +1,9 @@
+* { font-family: "DejaVu Sans", sans-serif; font-size: 13px; }
+window#waybar { background: #1f2428; color: #d8dee9; }
+#custom-apps { background: #3b4252; padding: 0 8px; }
+#taskbar button { padding: 0 6px; color: #d8dee9; }
+#taskbar button.active { background: #3b4252; }
+#clock, #cpu, #memory, #temperature, #network, #pulseaudio, #tray, #custom-gpu { padding: 0 8px; }
+#custom-gpu.ok { color: #a3be8c; }
+#custom-gpu.warning { color: #ebcb8b; }
+#custom-gpu.critical { color: #bf616a; }

@@ -1,0 +1,15 @@
+[Unit]
+Description=VisionFive 2 first boot: grow the root filesystem, create SSH host keys
+After=local-fs.target
+Before=ssh.service greetd.service vf2-selftest.service systemd-user-sessions.service
+ConditionPathExists=!/var/lib/vf2/firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/vf2/firstboot
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=VisionFive 2 GPU self-test (first boot, before the desktop starts)
+Wants=vf2-firstboot.service
+After=vf2-firstboot.service systemd-modules-load.service systemd-udevd.service
+Before=greetd.service display-manager.service
+ConditionPathExists=!/var/lib/vf2/selftest-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/vf2-selftest --boot
+TimeoutStartSec=30min
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

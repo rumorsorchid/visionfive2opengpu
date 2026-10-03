@@ -1,0 +1,147 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# vf2-selftest - check the VisionFive 2 GPU + HDMI stack with the open
+# firmware and write a report.
+#
+#   sudo vf2-selftest           full run: stack checks, then real GPU jobs
+#                               through openfw (openfw-test.sh). The GPU
+#                               must be idle: log out of the desktop first,
+#                               or run it from a text console (Ctrl+Alt+F2)
+#                               after "sudo systemctl stop greetd".
+#   sudo vf2-selftest --quick   checks plus a short Vulkan run; fine while
+#                               the desktop is running
+#   vf2-selftest --boot         what vf2-selftest.service runs once on the
+#                               first boot, before the desktop starts
+#
+# Reports: /var/log/vf2/ (summary in selftest-summary.txt). The result
+# (ok, fail or skipped) goes to /var/lib/vf2/gpu-status, which the desktop
+# session reads: after a failed self-test it composites in software.
+# Add vf2.selftest=0 to the kernel command line to skip the boot run.
+
+set -u
+STATE=/var/lib/vf2
+LOGDIR=/var/log/vf2
+BOARD=/usr/lib/vf2/board
+FW=/lib/firmware/powervr/rogue_36.50.54.182_v1.fw
+MODE=full
+case ${1:-} in
+--boot) MODE=boot ;;
+--quick) MODE=quick ;;
+"") ;;
+*) echo "usage: $0 [--quick|--boot]"; exit 2 ;;
+esac
+
+[ "$(id -u)" = 0 ] || { echo "run as root: sudo $0 $*"; exit 1; }
+mkdir -p "$STATE" "$LOGDIR"
+say() { echo "vf2-selftest: $*"; }
+finish() { # finish STATUS: record the result, mark the boot run as done
+	echo "$1" >"$STATE/gpu-status"
+	rm -f "$STATE/selftest-started"
+	[ "$MODE" = boot ] && touch "$STATE/selftest-done"
+	sync
+}
+
+if [ "$MODE" = boot ]; then
+	if grep -qw 'vf2.selftest=0' /proc/cmdline; then
+		say "skipped (vf2.selftest=0 on the kernel command line)"
+		finish skipped
+		exit 0
+	fi
+	if [ -e "$STATE/selftest-started" ]; then
+		say "the previous self-test did not finish (the board hung or was reset"
+		say "during it). Not running it again; the desktop will composite in"
+		say "software. Logs of the interrupted run: $LOGDIR"
+		echo "FAIL  the first-boot self-test did not finish (hang or reset during the GPU tests)" \
+			>"$LOGDIR/selftest-summary.txt"
+		finish fail
+		exit 0
+	fi
+fi
+
+if ! grep -q 'starfive,jh7110' /proc/device-tree/compatible 2>/dev/null; then
+	say "not a JH7110 board; nothing to test"
+	echo "SKIP  not a JH7110 board" >"$LOGDIR/selftest-summary.txt"
+	finish skipped
+	exit 0
+fi
+
+# The driver loads from udev as soon as the GPU's DT node is probed.
+render=
+for i in $(seq 1 90); do
+	for n in /sys/class/drm/renderD*; do
+		[ -e "$n/device/driver" ] || continue
+		[ "$(basename "$(readlink -f "$n/device/driver")")" = powervr ] && render=$n
+	done
+	[ -n "$render" ] && break
+	[ "$i" = 30 ] && modprobe powervr 2>/dev/null
+	sleep 1
+done
+
+stamp=$(date +%Y%m%d-%H%M%S)
+summary=$LOGDIR/selftest-summary.txt
+cd "$LOGDIR" || exit 1
+touch "$STATE/selftest-started"
+sync
+
+{
+	echo "VisionFive 2 GPU self-test, $(date '+%F %T'), mode $MODE"
+	echo "kernel $(uname -r); firmware sha256 $(sha256sum "$FW" 2>/dev/null | cut -c1-16)..."
+	echo
+} >"$summary"
+
+if [ -z "$render" ]; then
+	say "the PowerVR GPU did not come up (no powervr render node after 90 s)"
+	echo "FAIL  no powervr render node (see: journalctl -k | grep -i powervr)" >>"$summary"
+fi
+
+fails=0
+run() { # run TITLE COMMAND...: one test script, its PASS/FAIL lines into the summary
+	title=$1; shift
+	say "== $title"
+	out=$LOGDIR/$(echo "$title" | tr ' /' '--')-$stamp.txt
+	# live on the console (PASS/FAIL lines as they happen), whole output to $out
+	{ "$@" 2>&1; echo $? >"$out.rc"; } | tee "$out" | grep --line-buffered -E '^(PASS|FAIL|WARN|SKIP|==) ' | sed -u 's/^/  /'
+	rc=$(cat "$out.rc" 2>/dev/null || echo 1)
+	rm -f "$out.rc"
+	{
+		echo "== $title (exit $rc, log $out)"
+		grep -E '^(PASS|FAIL|WARN|SKIP) ' "$out"
+		echo
+	} >>"$summary"
+	fails=$((fails + rc))
+}
+
+if [ -n "$render" ]; then
+	if [ "$MODE" = quick ]; then
+		run "stack check" sh "$BOARD/vf2-gpu-check.sh" --run
+	else
+		run "stack check" sh "$BOARD/vf2-gpu-check.sh"
+		# openfw-test.sh swaps the firmware in and restores the previous
+		# file afterwards; given the installed openfw it reloads the same
+		# file around real jobs: Vulkan, vkmark scenes, two clients at
+		# once, Zink, runtime suspend/resume between workloads.
+		run "openfw jobs" sh "$BOARD/openfw-test.sh" "$FW"
+		run "Vulkan check" sh "$BOARD/vf2-gpu-check.sh" --run
+	fi
+else
+	fails=$((fails + 1))
+fi
+
+if [ "$fails" = 0 ]; then
+	echo "RESULT: all checks passed" >>"$summary"
+	say "all checks passed; report: $summary"
+	finish ok
+else
+	echo "RESULT: $fails failed check(s); details in $LOGDIR" >>"$summary"
+	say "$fails failed check(s); report: $summary"
+	if grep -q 'something has a render node open' "$LOGDIR"/openfw-jobs-"$stamp".txt 2>/dev/null; then
+		say "the GPU was busy: log out of the desktop, or use: sudo vf2-selftest --quick"
+		# a busy GPU says nothing about the stack: keep the previous result
+		rm -f "$STATE/selftest-started"
+		exit 1
+	fi
+	finish fail
+fi
+# The boot run never fails the unit; a manual run reports through its status.
+[ "$MODE" = boot ] || [ "$fails" = 0 ]

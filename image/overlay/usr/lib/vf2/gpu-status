@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# gpu-status - waybar module: how the desktop renders, and the self-test result
+st=$(cat /var/lib/vf2/gpu-status 2>/dev/null || echo "not run")
+case ${VF2_RENDER_MODE:-} in
+gpu) text="GPU: PowerVR"; class=ok ;;
+software) text="GPU: software"; class=warning ;;
+*) text="GPU: ?"; class=warning ;;
+esac
+[ "$st" = fail ] && class=critical
+printf '{"text": "%s", "tooltip": "compositing: %s\\nfirst-boot self-test: %s\\nclick: welcome / test report", "class": "%s"}\n' \
+	"$text" "${VF2_RENDER_MODE:-unknown}" "$st" "$class"

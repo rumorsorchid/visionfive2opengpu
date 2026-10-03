@@ -1,0 +1,122 @@
+# Builds the flashable VisionFive 2 Debian sid image (image/build.sh) and
+# publishes it as a GitHub release: kernel (blob-free, audited), openfw
+# rebuilt from source and checked against the published build, Mesa,
+# labwc desktop, Firefox, board tests.
+name: image
+
+on:
+  push:
+    branches: ['claude/vision-five-gpu-hdmi-fvla16', 'main', 'master']
+    paths:
+      - 'image/**'
+      - 'kernel/**'
+      - 'openfw/**'
+      - 'board/**'
+      - 'tools/pvrfw.py'
+      - '.github/workflows/image.yml'
+    tags: ['image-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/local/.ghcup /usr/share/swift
+          sudo mkdir -p /mnt/work && sudo chown "$(id -u):$(id -g)" /mnt/work
+          df -h / /mnt
+
+      - name: Host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu gcc-mipsel-linux-gnu \
+            libc6-dev-mipsel-cross bc bison flex kmod libssl-dev libelf-dev libdw-dev python3 rsync \
+            debhelper dpkg-dev qemu-user-static
+          git config --global user.name "VisionFive 2 image CI"
+          git config --global user.email "ci@localhost"
+          cat /proc/sys/fs/binfmt_misc/qemu-riscv64
+
+      - name: openfw from source must equal the published build
+        run: |
+          (cd openfw/prebuilt && sha256sum -c SHA256SUMS)
+          make -C openfw clean all
+          sha256sum openfw/rogue_36.50.54.182_v1.fw openfw/prebuilt/rogue_36.50.54.182_v1.fw
+          cmp openfw/rogue_36.50.54.182_v1.fw openfw/prebuilt/rogue_36.50.54.182_v1.fw
+
+      - name: Kernel cache
+        id: kcache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/work/kdebs
+          key: kernel-${{ hashFiles('kernel/**') }}
+
+      - name: Kernel (v7.3-rc5 + patches, blob audit)
+        if: steps.kcache.outputs.cache-hit != 'true'
+        run: |
+          ./kernel/build.sh /mnt/work/linux /mnt/work/kbuild/build
+          mkdir -p /mnt/work/kdebs
+          cp /mnt/work/kbuild/linux-image-*.deb /mnt/work/kdebs/
+          rm -f /mnt/work/kdebs/*-dbg_*.deb
+          rm -rf /mnt/work/kbuild /mnt/work/linux
+
+      - name: Image (Debian sid, built in a debian:sid container)
+        run: |
+          mkdir -p /mnt/work/out /mnt/work/tmp
+          docker run --rm --privileged -v "$PWD:/src" -v /mnt/work:/work -w /src debian:sid sh -euc '
+            apt-get update
+            apt-get install -y --no-install-recommends mmdebstrap debian-archive-keyring arch-test \
+              fdisk e2fsprogs pigz git ca-certificates dpkg-dev
+            git config --global --add safe.directory /src
+            TMPDIR=/work/tmp image/build.sh --kernel-debs /work/kdebs --out /work/out \
+              --name "vf2-debian-sid-$(date -u +%Y%m%d)-${{ github.run_number }}"'
+          sudo chown -R "$(id -u):$(id -g)" /mnt/work/out
+          ls -la /mnt/work/out /mnt/work/out/debs
+
+      - name: Release notes
+        id: notes
+        run: |
+          cd /mnt/work/out
+          name=$(basename "$(ls *.img.gz)" .img.gz)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          {
+            echo "Flashable Debian sid for the VisionFive 2 (rev 1.3B) with the open GPU stack."
+            echo "Not tested on a board by CI: QEMU cannot emulate the JH7110."
+            echo
+            echo "Write it to the NVMe drive from OpenBSD (replace sdN with the NVMe disk, see image/README.md):"
+            echo
+            echo '```'
+            echo "sha256 -C $name.img.gz.sha256 $name.img.gz"
+            echo "gunzip -c $name.img.gz | dd of=/dev/rsdNc bs=1m"
+            echo '```'
+            echo
+            echo '```'
+            cat "$name.build-info"
+            echo '```'
+          } > notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.notes.outputs.name }}
+          name: ${{ steps.notes.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          body_path: /mnt/work/out/notes.md
+          files: |
+            /mnt/work/out/*.img.gz
+            /mnt/work/out/*.img.gz.sha256
+            /mnt/work/out/*.packages
+            /mnt/work/out/*.build-info
+            /mnt/work/out/debs/*.deb

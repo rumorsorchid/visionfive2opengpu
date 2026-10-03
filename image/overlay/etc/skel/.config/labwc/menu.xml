@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- right-click desktop menu of the VisionFive 2 image -->
+<openbox_menu>
+  <menu id="gpu-menu" label="GPU tests">
+    <item label="Welcome and self-test report"><action name="Execute" command="vf2-welcome"/></item>
+    <item label="On-screen GPU test"><action name="Execute" command="foot -H vf2-desktop-test"/></item>
+    <item label="vkcube (Vulkan)"><action name="Execute" command="vkcube --wsi wayland"/></item>
+    <item label="vkmark (Vulkan benchmark)"><action name="Execute" command="foot -H vkmark --winsys wayland"/></item>
+    <item label="glmark2 (OpenGL ES through Zink)"><action name="Execute" command="foot -H glmark2-es2-wayland"/></item>
+    <item label="Benchmark report"><action name="Execute" command="foot -H sh -c 'cd ~ &amp;&amp; /usr/lib/vf2/board/bench.sh wayland'"/></item>
+  </menu>
+  <menu id="root-menu" label="">
+    <item label="Terminal"><action name="Execute" command="foot"/></item>
+    <item label="Web browser"><action name="Execute" command="sensible-browser"/></item>
+    <item label="Web browser (software rendering)"><action name="Execute" command="env LIBGL_ALWAYS_SOFTWARE=1 sensible-browser"/></item>
+    <item label="Files"><action name="Execute" command="thunar"/></item>
+    <item label="Applications"><action name="Execute" command="fuzzel"/></item>
+    <menu id="gpu-menu"/>
+    <separator/>
+    <item label="Reload labwc settings"><action name="Reconfigure"/></item>
+    <item label="Log out"><action name="Exit"/></item>
+    <item label="Reboot"><action name="Execute" command="systemctl reboot"/></item>
+    <item label="Power off"><action name="Execute" command="systemctl poweroff"/></item>
+  </menu>
+</openbox_menu>

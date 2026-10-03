@@ -1,0 +1,24 @@
+# Installed when the archive has them for riscv64; skipped (and listed in
+# /usr/share/doc/vf2-integration/skipped-packages) otherwise.
+
+# more GPU tests and tools
+kmscube
+drm-info
+glmark2-wayland
+mesa-utils-bin
+fastfetch
+
+# emulators with free cores only (Debian main); ROMs and BIOS files are
+# not included
+retroarch
+libretro-mgba
+libretro-nestopia
+libretro-gambatte
+libretro-beetle-psx
+libretro-beetle-pce-fast
+libretro-desmume
+ppsspp
+
+# media
+mpv
+imv

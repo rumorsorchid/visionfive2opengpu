@@ -1,0 +1,21 @@
+// waybar panel of the VisionFive 2 image
+{
+  "layer": "top",
+  "position": "top",
+  "height": 28,
+  "modules-left": ["custom/apps", "wlr/taskbar"],
+  "modules-center": ["clock"],
+  "modules-right": ["custom/gpu", "cpu", "memory", "temperature", "network", "pulseaudio", "tray"],
+  "custom/apps": { "format": " Apps ", "on-click": "fuzzel", "tooltip": false },
+  "wlr/taskbar": { "format": "{title:.28}", "on-click": "activate", "on-click-middle": "close" },
+  "clock": { "format": "{:%a %d %b  %H:%M}" },
+  "custom/gpu": { "exec": "/usr/lib/vf2/gpu-status", "return-type": "json", "interval": 30,
+                  "on-click": "vf2-welcome" },
+  "cpu": { "format": "CPU {usage}%" },
+  "memory": { "format": "RAM {percentage}%" },
+  "temperature": { "format": "{temperatureC}°C" },
+  "network": { "format-ethernet": "{ipaddr}", "format-wifi": "{essid}", "format-disconnected": "offline",
+               "tooltip-format": "{ifname} {ipaddr}/{cidr}", "on-click": "nm-connection-editor" },
+  "pulseaudio": { "format": "VOL {volume}%", "format-muted": "muted", "on-click": "pavucontrol" },
+  "tray": { "spacing": 6 }
+}

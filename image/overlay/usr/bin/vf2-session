@@ -1,0 +1,65 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# vf2-session - start the labwc desktop on the VisionFive 2 open GPU stack.
+# greetd runs it (autologin on first boot, tuigreet afterwards).
+#
+# The JH7110 has two DRM devices: verisilicon-dc drives HDMI but cannot
+# render, and powervr renders but has no display. wlroots allocates the
+# scanout buffers on the display device (contiguous memory the DC8200 can
+# scan out) and renders into them on the device WLR_RENDER_DRM_DEVICE
+# names. With the PowerVR render node there, labwc's GLES2 renderer runs
+# through Zink on the PowerVR Vulkan driver. wlroots' Vulkan renderer
+# needs VK_KHR_synchronization2, which Mesa's PowerVR driver does not
+# offer yet, so GLES2 through Zink it is.
+
+# shellcheck source=/dev/null
+[ -r /etc/default/vf2-desktop ] && . /etc/default/vf2-desktop
+VF2_RENDERER=${VF2_RENDERER:-auto}
+
+export XDG_CURRENT_DESKTOP=labwc:wlroots XDG_SESSION_DESKTOP=labwc XDG_SESSION_TYPE=wayland
+export MOZ_ENABLE_WAYLAND=1 QT_QPA_PLATFORM='wayland;xcb' _JAVA_AWT_WM_NONREPARENTING=1
+# Mesa's PowerVR Vulkan driver is not conformance tested on BXE-4-32 yet;
+# Zink and every Vulkan application need these (greetd does not read
+# /etc/environment.d).
+export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1 MESA_VK_DEVICE_SELECT=1010:36054182
+
+state=${XDG_STATE_HOME:-$HOME/.local/state}
+mkdir -p "$state"
+log=$state/vf2-session.log
+[ -f "$log" ] && mv -f "$log" "$log.old"
+
+render=
+for n in /sys/class/drm/renderD*; do
+	[ -e "$n/device/driver" ] || continue
+	if [ "$(basename "$(readlink -f "$n/device/driver")")" = powervr ]; then
+		render=/dev/dri/${n##*/}
+	fi
+done
+selftest=$(cat /var/lib/vf2/gpu-status 2>/dev/null || echo unknown)
+
+if [ "$VF2_RENDERER" != pixman ] && [ -n "$render" ] && [ "$selftest" != fail ]; then
+	export WLR_RENDER_DRM_DEVICE="$render" VF2_RENDER_MODE=gpu
+else
+	export WLR_RENDERER=pixman VF2_RENDER_MODE=software
+	unset WLR_RENDER_DRM_DEVICE
+fi
+
+{
+	echo "vf2-session $(date '+%F %T'): renderer=$VF2_RENDER_MODE render-node=${render:-none}" \
+		"self-test=$selftest"
+} >>"$log"
+
+start=$(date +%s)
+labwc -V >>"$log" 2>&1
+rc=$?
+if [ "$rc" != 0 ] && [ "$VF2_RENDER_MODE" = gpu ] && [ $(($(date +%s) - start)) -lt 20 ]; then
+	# labwc died right away with the GPU renderer: come up in software
+	# so the desktop (and the logs) can still be reached.
+	echo "vf2-session: labwc exited ($rc) with GPU rendering; retrying in software" >>"$log"
+	unset WLR_RENDER_DRM_DEVICE
+	export WLR_RENDERER=pixman VF2_RENDER_MODE=software VF2_FALLBACK=1
+	labwc -V >>"$log" 2>&1
+	rc=$?
+fi
+exit "$rc"

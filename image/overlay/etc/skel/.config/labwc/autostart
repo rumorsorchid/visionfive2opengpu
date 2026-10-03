@@ -1,0 +1,6 @@
+# Started by labwc when the session begins (sh syntax).
+swaybg -c '#1f2428' >/dev/null 2>&1 &
+waybar >/dev/null 2>&1 &
+mako >/dev/null 2>&1 &
+command -v nm-applet >/dev/null && nm-applet --indicator >/dev/null 2>&1 &
+vf2-welcome --first-login >/dev/null 2>&1 &

@@ -1,0 +1,7 @@
+# The image runs the kernel built from kernel/ in the VisionFive 2 open GPU
+# repository: Debian's kernel lacks the JH7110 HDMI series and the XPbmtUC
+# errata the GPU needs. Keep apt from installing Debian kernels next to it.
+# Delete this file once Debian's kernel carries those patches.
+Package: linux-image-*
+Pin: release o=Debian
+Pin-Priority: -1

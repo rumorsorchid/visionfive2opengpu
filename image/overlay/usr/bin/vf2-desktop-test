@@ -1,0 +1,84 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# vf2-desktop-test - run inside the desktop: checks that the compositor,
+# Vulkan and OpenGL (Zink) all render on the PowerVR GPU, with short
+# on-screen runs of vkcube, vkmark and glmark2.
+#
+#   vf2-desktop-test           (report: ~/vf2-desktop-test-<date>.txt)
+
+# shellcheck disable=SC2015  # pass/warn/fail always succeed
+set -u
+[ -n "${WAYLAND_DISPLAY:-}" ] || { echo "run this inside the desktop session"; exit 1; }
+export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1 MESA_VK_DEVICE_SELECT=1010:36054182
+OUT=$HOME/vf2-desktop-test-$(date +%Y%m%d-%H%M%S).txt
+FAILS=0
+exec 3>"$OUT"
+log() { echo "$*"; echo "$*" >&3; }
+pass() { log "PASS  $*"; }
+warn() { log "WARN  $*"; }
+fail() { log "FAIL  $*"; FAILS=$((FAILS + 1)); }
+have() { command -v "$1" >/dev/null 2>&1; }
+resets() { journalctl -k -q --no-pager 2>/dev/null | grep -ciE 'powervr.*(timeout|timed out|hard reset|lost)'; }
+before=$(resets)
+
+log "== compositor"
+slog=${XDG_STATE_HOME:-$HOME/.local/state}/vf2-session.log
+log "session: renderer=${VF2_RENDER_MODE:-?} render node=${WLR_RENDER_DRM_DEVICE:-none}"
+glr=$(grep -m1 -iE 'GL renderer' "$slog" 2>/dev/null | sed 's/.*GL renderer: *//')
+[ -n "$glr" ] && log "labwc GL renderer: $glr"
+if [ "${VF2_RENDER_MODE:-}" = gpu ] && echo "$glr" | grep -qi 'zink.*powervr'; then
+	pass "labwc composites on the PowerVR GPU (Zink)"
+elif [ "${VF2_RENDER_MODE:-}" = gpu ] && [ -z "$glr" ]; then
+	warn "could not read labwc's renderer from $slog"
+else
+	fail "labwc composites in software (see $slog)"
+fi
+
+log ""
+log "== Vulkan"
+if have vulkaninfo; then
+	dev=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName *= *//p' | head -n 1)
+	log "device: ${dev:-none}"
+	echo "$dev" | grep -q 'BXE-4-32' && pass "Vulkan device is the BXE-4-32" || fail "no PowerVR Vulkan device"
+fi
+if have vkcube; then
+	timeout 20 vkcube --wsi wayland --c 300 >&3 2>&1 && pass "vkcube (300 frames, on screen)" ||
+		fail "vkcube"
+fi
+if have vkmark; then
+	vkmark --winsys wayland -s 1280x720 -b cube:duration=8 -b effect2d:duration=6 \
+		-b texture:duration=6 2>&1 | tee -a /dev/fd/3 | grep -E 'Score|FPS' &&
+		pass "vkmark windowed" || fail "vkmark windowed"
+fi
+
+log ""
+log "== OpenGL / GLES through Zink"
+if have eglinfo; then
+	r=$(eglinfo -B -p wayland 2>/dev/null | grep -m1 'OpenGL ES profile renderer' | sed 's/.*renderer: *//')
+	log "EGL (Wayland) GLES renderer: ${r:-none}"
+	echo "$r" | grep -qi 'zink.*powervr' && pass "GLES on Wayland uses Zink on PowerVR" ||
+		fail "GLES on Wayland is not on the GPU"
+fi
+if have glxinfo; then
+	r=$(glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p')
+	log "GLX (XWayland) renderer: ${r:-none}"
+	echo "$r" | grep -qi 'zink.*powervr' && pass "X11 OpenGL uses Zink on PowerVR" ||
+		warn "X11 OpenGL is not on the GPU"
+fi
+if have glmark2-es2-wayland; then
+	glmark2-es2-wayland -s 1280x720 -b build:duration=6 -b texture:duration=6 \
+		-b shading:duration=6 2>&1 | tee -a /dev/fd/3 | grep -E 'GL_RENDERER|Score' &&
+		pass "glmark2-es2 windowed" || fail "glmark2-es2 windowed"
+fi
+
+log ""
+after=$(resets)
+if [ "$after" = "$before" ]; then
+	pass "no GPU timeouts or firmware resets during the test"
+else
+	fail "$((after - before)) GPU timeout/reset messages (journalctl -k | grep -i powervr)"
+fi
+log ""
+log "$FAILS failed check(s); report: $OUT"
+exit "$FAILS"

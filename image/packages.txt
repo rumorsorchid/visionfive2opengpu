@@ -1,0 +1,81 @@
+# Packages of the VisionFive 2 image (Debian sid, component main only).
+# One per line; "a|b" installs the first one the archive has. A package
+# missing from the archive fails the build (see packages-optional.txt).
+
+# base system
+systemd-sysv
+systemd-timesyncd
+systemd-zram-generator
+udev
+dbus
+dbus-user-session
+polkitd
+sudo
+locales
+tzdata
+ca-certificates
+initramfs-tools
+u-boot-menu
+zstd
+e2fsprogs
+cloud-guest-utils
+fdisk
+kmod
+procps
+psmisc
+lsof
+file
+less
+nano
+vim-tiny
+htop
+curl
+wget
+iproute2
+iputils-ping
+pciutils
+usbutils
+bash-completion
+network-manager
+openssh-server
+sensible-utils
+man-db
+
+# GPU stack: Mesa's PowerVR Vulkan driver, Zink for OpenGL/GLES, tests
+mesa-vulkan-drivers
+libgl1-mesa-dri
+libegl-mesa0
+libglx-mesa0
+libgles2
+libgbm1
+mesa-utils
+vulkan-tools
+vkmark
+glmark2-es2-wayland
+
+# desktop: greetd + labwc (wlroots) on Wayland, XWayland for X11 programs
+greetd
+# login screen after logout; greetd's own agreety if tuigreet is missing
+tuigreet|greetd
+labwc
+waybar
+swaybg
+foot
+fuzzel
+mako-notifier
+xwayland
+xdg-desktop-portal-wlr
+xdg-desktop-portal-gtk
+grim
+slurp
+wl-clipboard
+wlr-randr
+thunar
+network-manager-gnome
+pipewire-audio
+pavucontrol
+fonts-dejavu-core
+adwaita-icon-theme
+
+# web browser (WebRender and WebGL through Zink)
+firefox-esr|firefox|epiphany-browser

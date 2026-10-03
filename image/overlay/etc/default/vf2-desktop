@@ -1,0 +1,9 @@
+# Settings for vf2-session, the labwc desktop session.
+#
+# VF2_RENDERER
+#   auto    composite on the GPU: labwc's GLES2 renderer through Zink on
+#           the PowerVR render node; software if that cannot start, and
+#           software if the first-boot GPU self-test failed
+#   pixman  always composite in software (applications can still use
+#           the GPU through Vulkan and Zink)
+VF2_RENDERER=auto

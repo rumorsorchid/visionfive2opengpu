@@ -1,0 +1,12 @@
+#!/bin/sh
+# VisionFive 2 open GPU image: self-test result and default password note
+st=$(cat /var/lib/vf2/gpu-status 2>/dev/null || echo "not run yet")
+echo
+echo "VisionFive 2 open GPU stack: first-boot GPU self-test: $st (/var/log/vf2/)"
+echo "Desktop test: vf2-desktop-test   Full GPU test: sudo vf2-selftest   Report: sudo /usr/lib/vf2/board/vf2-gpu-check.sh --run"
+# The image stores the shadow hash of the default password (root only):
+# remind until it changes. update-motd.d scripts run as root.
+if [ -r /var/lib/vf2/default-password ] &&
+	[ "$(getent shadow vf2 | cut -d: -f2)" = "$(cat /var/lib/vf2/default-password)" ]; then
+	echo "The password of user vf2 is still the default (vf2): change it with passwd."
+fi
