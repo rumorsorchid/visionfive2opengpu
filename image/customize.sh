@@ -55,7 +55,9 @@ EOF
 # modules, so the console comes back on HDMI early (docs/boot.md).
 mkdir -p /etc/initramfs-tools
 cat >>/etc/initramfs-tools/modules <<'EOF'
-# VisionFive 2: root on NVMe behind the JH7110 PCIe controller
+# VisionFive 2: root on NVMe behind the JH7110 PCIe controller (built
+# into the image's kernel; listed for kernels that have them as modules)
+clk-starfive-jh7110-stg
 phy-jh7110-pcie
 pcie-starfive
 nvme
@@ -209,8 +211,11 @@ grep -q "linux /boot/vmlinuz-$kver" "$ext" || die "$ext does not boot $kver"
 grep -q "initrd /boot/initrd.img-$kver" "$ext" || die "$ext has no initrd"
 grep -q "fdt /usr/lib/linux-image-$kver/$DTB" "$ext" || die "$ext has no fdt line for $DTB"
 grep -q "root=UUID=$FSUUID" "$ext" || die "$ext has the wrong root="
-for m in nvme pcie-starfive verisilicon-dc; do
-	lsinitramfs "/boot/initrd.img-$kver" | grep -q "/$m.ko" || die "initramfs lacks $m"
+# The NVMe path and the display driver: built in, or in the initramfs.
+inird=$(lsinitramfs "/boot/initrd.img-$kver")
+for m in clk-starfive-jh7110-stg phy-jh7110-pcie pcie-starfive nvme verisilicon-dc; do
+	grep -q "/$m.ko\$" "/lib/modules/$kver/modules.builtin" && continue
+	echo "$inird" | grep -q "/$m.ko" || die "$m is neither built in nor in the initramfs"
 done
 say "boot: $(grep -c '^label' "$ext") extlinux entries for $kver"
 
