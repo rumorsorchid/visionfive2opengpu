@@ -45,8 +45,8 @@ On an x86_64 host with `riscv64-linux-gnu-gcc` 13.3:
 | `dt_binding_check DT_SCHEMA_FILES=gpu/img,powervr-rogue.yaml` | passes, incl. the new JH7110 example |
 | Binding negative tests (JH7110 node with 3 clocks / 1 reset; TI node with 5 clocks) | rejected as intended |
 | `CHECK_DTBS=y jh7110-starfive-visionfive-2-v1.3b.dtb` | no warnings |
-| `checkpatch.pl --strict` on patches 27–30, 40–41 | only a trailer-capitalisation nit (`Co-Authored-By`) |
-| `build.sh` on a fresh v7.3-rc5 clone (`git am` of all 42, build, `bindeb-pkg`; also in CI on every image build) | `linux-image` .deb with `powervr.ko`, `verisilicon-dc.ko`, and the v1.3b DTB |
+| `checkpatch.pl --strict` on patches 27–30, 40–44 | only a trailer-capitalisation nit (`Co-Authored-By`) |
+| `build.sh` on a fresh v7.3-rc5 clone (`git am` of all 44, build, `bindeb-pkg`; also in CI on every image build) | `linux-image` .deb with `powervr.ko`, the display drivers built in, and the v1.3b DTB |
 
 **Not done here:** booting it. There is no VisionFive 2 in this
 environment; everything hardware-facing needs `board/` run on a real
@@ -85,6 +85,9 @@ carries the on-list series:
 | 39 | D. Belhachemi | don't send CLEANUP for a context with jobs in flight | workaround; the context is freed either way, which no firmware survives if it still holds it. Should not trigger: jobs hold context references until they complete, and with openfw's in-firmware recovery even a hung job completes |
 | 40 | new | POWER_EVENT sequence taken from the firmware's own routine; `jh7110_power_event` selector; `rd_power_island` parameter (`POW_RASCALDUST`) | depends on `board/power-ab-test.sh` results |
 | 41 | new | kernel-doc fix + param description for 38 | fold into 38 |
+| 42 | new | virtio-gpu: create the cursor plane's blend mode property once (the duplicate made wlroots' atomic commits fail with `EINVAL`; QEMU only, not used on the board) | upstreamable, add Fixes: 6947b78df4d2 |
+| 43 | new | `jh7110_power_event` defaults to 2, the community's single `0xff000703` write that runs on boards; the firmware-derived sequence stays as 1 | fold into 40 once `board/power-ab-test.sh` has picked a winner |
+| 44 | new | JH7110: release GPU APB, wait 1 µs, then GPU domain A; assert in reverse with the same gap (the community's tested order; the array released both at once). Other SoCs keep the array | needs a DT binding note if upstreamed |
 
 "new" patches were written in this session (git author "Claude") and have
 no `Signed-off-by`: whoever submits them must review them and add their own
@@ -95,7 +98,7 @@ DCO sign-off.
 | Parameter | Default | Purpose |
 |---|---|---|
 | `exp_hw_support` | 0 | **must be 1** for BXE-4-32 (see `board/setup.sh`) |
-| `jh7110_power_event` | 1 | 0 none, 1 firmware sequence, 2 legacy single write |
+| `jh7110_power_event` | 2 | 0 none, 1 firmware sequence, 2 community single write tested on boards |
 | `rd_power_island` | 0 | pass `POW_RASCALDUST` to the firmware like StarFive's DDK |
 | `kernel_heap_guards` | 1 | PDS/USC guard mapping (patch 38) |
 | `init_fw_trace_mask` | 0 | firmware trace groups, read via `/sys/kernel/debug/dri/*/pvr_fw/trace_0` |

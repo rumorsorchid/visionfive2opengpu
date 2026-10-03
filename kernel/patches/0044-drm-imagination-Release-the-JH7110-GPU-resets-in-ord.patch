@@ -1,0 +1,113 @@
+From de5ae47dcf073f476d940f5712b1262eb7f5d90b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Oct 2026 14:44:13 +0000
+Subject: [PATCH 44/44] drm/imagination: Release the JH7110 GPU resets in order
+ with a delay
+
+The JH7110 lists two GPU reset lines, GPU APB and GPU domain A. The
+driver takes them as one array, so both are released and asserted
+together. The community VisionFive 2 bring-up, which runs Vulkan and
+Zink desktops on boards, releases APB, waits 1 us, then releases the
+domain reset, and asserts them in the reverse order with the same gap.
+
+Do the same on the JH7110: hold the two lines separately and sequence
+them as on the tested boards. Other SoCs keep the array.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/imagination/pvr_device.h |  8 +++++
+ drivers/gpu/drm/imagination/pvr_power.c  | 42 ++++++++++++++++++++++--
+ 2 files changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
+index b51cfcccba..f084800ba7 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.h
++++ b/drivers/gpu/drm/imagination/pvr_device.h
+@@ -188,6 +188,14 @@ struct pvr_device {
+ 	 */
+ 	struct reset_control *reset;
+ 
++	/**
++	 * @reset_domain: StarFive JH7110 only: the second of its two reset
++	 * lines (GPU domain A; @reset then holds GPU APB alone). It is
++	 * released 1 us after @reset and asserted 1 us before it, the order
++	 * and timing of the board-tested VisionFive 2 bring-up. NULL elsewhere.
++	 */
++	struct reset_control *reset_domain;
++
+ 	/** @pwrseq: Pointer to a power sequencer, if one is used. */
+ 	struct pwrseq_desc *pwrseq;
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_power.c b/drivers/gpu/drm/imagination/pvr_power.c
+index ec727647fa..f37a0ab04d 100644
+--- a/drivers/gpu/drm/imagination/pvr_power.c
++++ b/drivers/gpu/drm/imagination/pvr_power.c
+@@ -259,6 +259,29 @@ static int pvr_power_init_manual(struct pvr_device *pvr_dev)
+ 	struct drm_device *drm_dev = from_pvr_device(pvr_dev);
+ 	struct reset_control *reset;
+ 
++	/*
++	 * The JH7110's two lines (GPU APB, then GPU domain A) are released one
++	 * after the other with a delay between them, as on the VisionFive 2
++	 * boards they were tested on. Elsewhere all lines form one array.
++	 */
++	if (of_device_is_compatible(drm_dev->dev->of_node, "starfive,jh7110-gpu") &&
++	    of_count_phandle_with_args(drm_dev->dev->of_node, "resets",
++				       "#reset-cells") == 2) {
++		reset = devm_reset_control_get_exclusive_by_index(drm_dev->dev, 0);
++		if (IS_ERR(reset))
++			return dev_err_probe(drm_dev->dev, PTR_ERR(reset),
++					     "failed to get gpu reset line\n");
++		pvr_dev->reset = reset;
++
++		reset = devm_reset_control_get_exclusive_by_index(drm_dev->dev, 1);
++		if (IS_ERR(reset))
++			return dev_err_probe(drm_dev->dev, PTR_ERR(reset),
++					     "failed to get gpu domain reset line\n");
++		pvr_dev->reset_domain = reset;
++
++		return 0;
++	}
++
+ 	reset = devm_reset_control_array_get_optional_exclusive(drm_dev->dev);
+ 	if (IS_ERR(reset))
+ 		return dev_err_probe(drm_dev->dev, PTR_ERR(reset),
+@@ -307,8 +330,18 @@ static int pvr_power_on_sequence_manual(struct pvr_device *pvr_dev)
+ 	if (err)
+ 		goto err_rtc_clk_disable;
+ 
++	if (pvr_dev->reset_domain) {
++		udelay(1);
++		err = reset_control_deassert(pvr_dev->reset_domain);
++		if (err)
++			goto err_reset_assert;
++	}
++
+ 	return 0;
+ 
++err_reset_assert:
++	reset_control_assert(pvr_dev->reset);
++
+ err_rtc_clk_disable:
+ 	clk_disable_unprepare(pvr_dev->rtc_clk);
+ 
+@@ -329,9 +362,14 @@ static int pvr_power_on_sequence_manual(struct pvr_device *pvr_dev)
+ 
+ static int pvr_power_off_sequence_manual(struct pvr_device *pvr_dev)
+ {
+-	int err;
++	int err = 0;
++
++	if (pvr_dev->reset_domain) {
++		err = reset_control_assert(pvr_dev->reset_domain);
++		udelay(1);
++	}
+ 
+-	err = reset_control_assert(pvr_dev->reset);
++	err = reset_control_assert(pvr_dev->reset) ?: err;
+ 
+ 	clk_disable_unprepare(pvr_dev->rtc_clk);
+ 	clk_disable_unprepare(pvr_dev->apb_clk);
+-- 
+2.43.0
+

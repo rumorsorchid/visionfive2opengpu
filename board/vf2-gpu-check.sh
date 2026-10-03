@@ -73,8 +73,15 @@ fwline=$(dmesg | grep -o 'FW version v[0-9.]* (build [0-9]* OS)' | tail -1)
 case $fwline in *"(build 0 OS)"*) log "(build 0 is openfw)" ;; esac
 
 section "modules"
+builtin=/lib/modules/$(uname -r)/modules.builtin
 for m in powervr verisilicon_dc jh7110_inno_hdmi phy_jh7110_inno_hdmi jh7110_vout_subsystem jh7110_hdmi_subsystem; do
-	if lsmod | grep -q "^${m} "; then pass "module $m loaded"; else warn "module $m not loaded"; fi
+	if lsmod | grep -q "^${m} "; then
+		pass "module $m loaded"
+	elif [ -r "$builtin" ] && sed 's,.*/,,; s,\.ko$,,; s,-,_,g' "$builtin" | grep -qx "$m"; then
+		pass "$m built into the kernel"
+	else
+		warn "module $m not loaded"
+	fi
 done
 log "powervr params:"
 for p in exp_hw_support jh7110_power_event kernel_heap_guards; do

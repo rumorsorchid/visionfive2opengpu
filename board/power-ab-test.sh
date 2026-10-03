@@ -4,8 +4,8 @@
 # power-ab-test.sh - find out which mechanism really ungates the BXE-4-32
 # rascal/dust power island on the JH7110. See docs/power.md.
 #
-#   A  jh7110_power_event=1   firmware-derived host sequence (default)
-#   L  jh7110_power_event=2   original community single write (known good)
+#   A  jh7110_power_event=1   firmware-derived host sequence
+#   L  jh7110_power_event=2   community single write (known good, default)
 #   B  jh7110_power_event=0   no host power-up (expected to fail)
 #   C  as B + PMU HW-event GPU bit unmasked in 0x04/0x08 (DDK glue)
 #   D  as B + rd_power_island=1 (firmware manages the island, like the DDK)

@@ -1,0 +1,52 @@
+From 7eb058fb707d9723eb56fc644491908f902d6c9c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 3 Oct 2026 14:36:17 +0000
+Subject: [PATCH 43/44] drm/imagination: Default to the board-tested BXE-4-32
+ power-up write
+
+The community VisionFive 2 bring-up powers the rascal/dust island with a
+single POWER_EVENT write of 0xff000703, polls POWER_COMPLETE and clears
+the event. That sequence runs on boards (Vulkan, vkmark, Zink desktops
+on v7.3-rc5). The firmware-derived sequence added as the default by the
+previous POWER_EVENT patch has not run on hardware yet.
+
+Make the tested write (jh7110_power_event=2) the default. The firmware's
+sequence stays available as jh7110_power_event=1 for comparison.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/imagination/pvr_fw_startstop.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_fw_startstop.c b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+index 9d0b22ceeb..ac8d385136 100644
+--- a/drivers/gpu/drm/imagination/pvr_fw_startstop.c
++++ b/drivers/gpu/drm/imagination/pvr_fw_startstop.c
+@@ -119,8 +119,9 @@ rogue_slc_init(struct pvr_device *pvr_dev)
+  * brings it up before booting the firmware:
+  *
+  *   0  not at all (use with rd_power_island=1, or to reproduce the hang)
+- *   1  the firmware's sequence (default)
+- *   2  the single-write value used by the original community patch
++ *   1  the firmware's sequence
++ *   2  the single-write value of the community bring-up (default): the
++ *      sequence that has been run on VisionFive 2 boards
+  */
+ #define ROGUE_CR_POWER_EVENT 0x0038U
+ #define ROGUE_CR_POWER_EVENT_TYPE_POWER_UP 0x00000001U
+@@ -134,10 +135,10 @@ rogue_slc_init(struct pvr_device *pvr_dev)
+ 
+ #define PVR_JH7110_POWER_EVENT_LEGACY 0xff000703U
+ 
+-static int pvr_jh7110_power_event = 1;
++static int pvr_jh7110_power_event = 2;
+ module_param_named(jh7110_power_event, pvr_jh7110_power_event, int, 0600);
+ MODULE_PARM_DESC(jh7110_power_event,
+-		 "BXE-4-32: host rascal/dust power-up before FW boot: 0 = none, 1 = firmware's sequence (default), 2 = legacy single write");
++		 "BXE-4-32: host rascal/dust power-up before FW boot: 0 = none, 1 = firmware's sequence, 2 = single write tested on boards (default)");
+ 
+ static int
+ pvr_bxe_4_32_power_up_rascal_dust(struct pvr_device *pvr_dev)
+-- 
+2.43.0
+
