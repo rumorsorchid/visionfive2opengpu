@@ -43,7 +43,7 @@ PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1
 MESA_VK_DEVICE_SELECT=1010:36054182
 EOF
 echo "wrote /etc/environment.d/90-powervr-jh7110.conf"
-echo "desktop: see docs/boot.md (WLR_RENDERER=vulkan, MESA_LOADER_DRIVER_OVERRIDE=zink)"
+echo "desktop: see docs/boot.md (WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 for labwc/sway)"
 
 if ! grep -qw 'cma=[0-9]*[MG]' /proc/cmdline; then
 	echo "note: consider adding cma=256M to the kernel command line"

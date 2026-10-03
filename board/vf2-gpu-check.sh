@@ -50,7 +50,14 @@ section "firmware"
 if [ -f "$FW" ]; then
 	sha=$(sha256sum "$FW" | cut -d' ' -f1)
 	log "sha256 $sha"
+	# openfw's published build: next to this script in the repository,
+	# or from the openfw-firmware package on the image
+	openfw_sha=$(cat "$(dirname "$0")/../openfw/prebuilt/SHA256SUMS" \
+		/usr/share/doc/openfw-firmware/SHA256SUMS 2>/dev/null |
+		awk '/rogue_36.50.54.182_v1.fw/ { print $1; exit }')
 	case "$sha" in
+	"$openfw_sha")
+		pass "FW is openfw, the open firmware (published build)" ;;
 	b5232ac64c0c708ee66400f40033ba4da8895a04ae688bc14821f59c5d4a6326)
 		warn "FW is v1.0 build 6503725; the tested build is v1.1 build 6976702" ;;
 	"$FW_V11_SHA")
@@ -63,6 +70,7 @@ else
 fi
 fwline=$(dmesg | grep -o 'FW version v[0-9.]* (build [0-9]* OS)' | tail -1)
 [ -n "$fwline" ] && pass "driver loaded firmware: $fwline" || warn "no 'FW version' line in dmesg yet"
+case $fwline in *"(build 0 OS)"*) log "(build 0 is openfw)" ;; esac
 
 section "modules"
 for m in powervr verisilicon_dc jh7110_inno_hdmi phy_jh7110_inno_hdmi jh7110_vout_subsystem jh7110_hdmi_subsystem; do

@@ -97,23 +97,30 @@ and power domain on, so use it only to debug.
    OpenGL and GLES on top of Vulkan). Mesa's BXE-4-32 support is not
    conformance tested yet, hence `PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1`,
    which `setup.sh` sets for login shells and graphical sessions.
-4. **Desktop.** There is no native OpenGL driver for this GPU, and Mesa's
-   render-only (`kmsro`) list does not include the `verisilicon` display
-   driver. So a compositor that renders with OpenGL on the display device
-   gets software rendering. Use Vulkan for the compositor and Zink for GL
-   clients:
+4. **Desktop.** The JH7110 has two DRM devices: `verisilicon-dc` drives
+   HDMI but cannot render, and `powervr` renders but has no display. Point
+   wlroots at the PowerVR render node. It still allocates the scanout
+   buffers on the display device (contiguous memory the DC8200 can scan
+   out) and renders into them on the GPU. labwc's GLES2 renderer then runs
+   through Zink on the PowerVR Vulkan driver:
 
    ```sh
-   export WLR_RENDERER=vulkan                 # labwc, sway and other wlroots compositors
-   export MESA_LOADER_DRIVER_OVERRIDE=zink    # GL/GLES clients through Zink
-   labwc                                      # or: sway; weston --renderer=vulkan
+   export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1 MESA_VK_DEVICE_SELECT=1010:36054182
+   export WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128   # the powervr render node
+   labwc                                              # or: sway
    ```
 
-   The PowerVR Vulkan driver has the extensions a Vulkan compositor needs
-   to scan out through KMS (`VK_EXT_image_drm_format_modifier`,
-   `VK_EXT_external_memory_dma_buf`, `VK_EXT_physical_device_drm`,
-   `VK_EXT_queue_family_foreign`). `board/bench.sh wayland` runs vkmark and
-   glmark2 inside such a session.
+   Do not set `WLR_RENDERER=vulkan`. wlroots' Vulkan renderer requires
+   `VK_KHR_synchronization2`, which Mesa 26.2's PowerVR driver (Vulkan 1.2)
+   does not offer, so it refuses the device. Wayland and XWayland clients
+   get Zink automatically when they render on the PowerVR node: Mesa falls
+   back to Zink when a device has no native GL driver.
+   `MESA_LOADER_DRIVER_OVERRIDE=zink` is not needed. Setting it globally
+   breaks programs that open the display device directly (KMS/GBM). This is
+   the configuration the community bring-up measured (labwc, glmark2-es2
+   through Zink). The image in [`image/`](../image/README.md) sets it up
+   (`vf2-session`). `board/bench.sh wayland` runs vkmark and glmark2 inside
+   such a session.
 5. **Memory.** The config fragment reserves 256 MiB of CMA for scanout
    buffers. Raise it with `cma=` on the command line for several 4K
    buffers.
