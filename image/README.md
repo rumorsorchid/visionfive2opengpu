@@ -157,6 +157,28 @@ offer yet. labwc therefore renders with GLES2, which Zink turns into
 Vulkan on the PowerVR GPU. The scanout buffers live on the display
 controller (wlroots allocates them there), and the GPU renders into them.
 
+## Troubleshooting
+
+* **U-Boot boots OpenBSD (or nothing) instead.** See section 3. At the U-Boot
+  prompt, `nvme scan; part list nvme 0` should list partition 1 as
+  bootable, and `bootflow scan -l nvme` should list an extlinux bootflow.
+  If `printenv bootmeths` shows a value (for example only `efi`), clear it:
+  `setenv bootmeths; saveenv`.
+* **The kernel starts but the screen stays black.** Log in over the serial
+  console (115200 8N1) or SSH (host `vf2`, user `vf2`), then run
+  `sudo /usr/lib/vf2/board/vf2-gpu-check.sh` and see docs/boot.md, "When
+  something goes wrong".
+* **The panel says "GPU: software".** The reason is in
+  `/var/log/vf2/selftest-summary.txt` (the first-boot test) and in
+  `~/.local/state/vf2-session.log` (the compositor). To run the first-boot
+  test again on the next boot: `sudo rm /var/lib/vf2/selftest-done
+  /var/lib/vf2/gpu-status; sudo reboot`.
+* **A GPU job hangs or the firmware resets.** Send the output of
+  `sudo vf2-selftest`, `/var/log/vf2/openfw-test-*.txt` (it includes the
+  firmware trace) and `journalctl -k -b`.
+* **Starting over.** Write the image again. It holds no state from earlier
+  boots.
+
 ## How open is it
 
 | Stage | What runs | Source |

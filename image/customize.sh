@@ -48,6 +48,9 @@ U_BOOT_MENU_LABEL="Debian sid (VisionFive 2 open GPU)"
 U_BOOT_ROOT="root=UUID=$FSUUID"
 U_BOOT_PARAMETERS="rw rootwait console=ttyS0,115200n8 console=tty0"
 U_BOOT_FDT="$DTB"
+# u-boot-menu 4.2 looks in /lib/firmware/<version>/ by default; kernel
+# packages put their device trees in /usr/lib/linux-image-<version>/
+U_BOOT_FDT_DIR="/usr/lib/linux-image-"
 U_BOOT_TIMEOUT="30"
 EOF
 

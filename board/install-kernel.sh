@@ -30,13 +30,24 @@ echo "kernel $ver installed; DTB $dtb"
 if command -v u-boot-update >/dev/null 2>&1; then
 	conf=/etc/default/u-boot
 	touch "$conf"
-	if grep -q '^U_BOOT_FDT=' "$conf"; then
-		sed -i "s|^U_BOOT_FDT=.*|U_BOOT_FDT=\"$DTB_NAME\"|" "$conf"
-	else
-		echo "U_BOOT_FDT=\"$DTB_NAME\"" >>"$conf"
-	fi
+	# u-boot-menu 4.2 looks for device trees in /lib/firmware/<version>/
+	# unless told otherwise; kernel packages install them here:
+	for kv in "U_BOOT_FDT=\"$DTB_NAME\"" 'U_BOOT_FDT_DIR="/usr/lib/linux-image-"'; do
+		key=${kv%%=*}
+		if grep -q "^$key=" "$conf"; then
+			sed -i "s|^$key=.*|$kv|" "$conf"
+		else
+			echo "$kv" >>"$conf"
+		fi
+	done
 	u-boot-update
-	echo "extlinux.conf regenerated (U_BOOT_FDT=$DTB_NAME)"
+	if grep -q "fdt /usr/lib/linux-image-$ver/$DTB_NAME" /boot/extlinux/extlinux.conf; then
+		echo "extlinux.conf regenerated (fdt $DTB_NAME)"
+	else
+		echo "WARNING: /boot/extlinux/extlinux.conf has no fdt line for $DTB_NAME;"
+		echo "U-Boot would boot with its own device tree (no GPU, no HDMI)"
+		exit 1
+	fi
 elif [ -d /boot/efi/dtb/starfive ]; then
 	dst=/boot/efi/dtb/$DTB_NAME
 	[ -f "$dst" ] && cp "$dst" "$dst.bak-$(date +%Y%m%d%H%M%S)"

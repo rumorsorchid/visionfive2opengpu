@@ -55,7 +55,8 @@ fi
 log ""
 log "== OpenGL / GLES through Zink"
 if have eglinfo; then
-	r=$(eglinfo -B -p wayland 2>/dev/null | grep -m1 'OpenGL ES profile renderer' | sed 's/.*renderer: *//')
+	r=$(eglinfo -B 2>/dev/null | awk '/^Wayland platform/ { w = 1 } /platform:?$/ && !/^Wayland/ { w = 0 }
+		w && /OpenGL ES profile renderer/ { sub(/.*renderer: */, ""); print; exit }')
 	log "EGL (Wayland) GLES renderer: ${r:-none}"
 	echo "$r" | grep -qi 'zink.*powervr' && pass "GLES on Wayland uses Zink on PowerVR" ||
 		fail "GLES on Wayland is not on the GPU"
