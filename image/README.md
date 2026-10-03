@@ -86,7 +86,8 @@ gunzip -c <name>.img.gz | dd of=/dev/rsd1c bs=1m
 sync
 ```
 
-The image is about 5 GB. On first boot it grows to fill the drive.
+The image is 3.8 GB unpacked (a 0.9 GB download). On first boot it grows
+to fill the drive.
 OpenBSD may warn that the backup GPT is not at the end of the disk. That
 is expected: first boot moves it.
 

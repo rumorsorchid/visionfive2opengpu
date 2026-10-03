@@ -17,6 +17,14 @@
 [ -r /etc/default/vf2-desktop ] && . /etc/default/vf2-desktop
 VF2_RENDERER=${VF2_RENDERER:-auto}
 
+# greetd's PAM stack does not read the system locale
+if [ -z "${LANG:-}" ] && [ -r /etc/default/locale ]; then
+	set -a
+	# shellcheck source=/dev/null
+	. /etc/default/locale
+	set +a
+fi
+
 export XDG_CURRENT_DESKTOP=labwc:wlroots XDG_SESSION_DESKTOP=labwc XDG_SESSION_TYPE=wayland
 export MOZ_ENABLE_WAYLAND=1 QT_QPA_PLATFORM='wayland;xcb' _JAVA_AWT_WM_NONREPARENTING=1
 # Start even with no keyboard or mouse plugged in yet (they hot-plug).
