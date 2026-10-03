@@ -86,6 +86,8 @@ for f in "$KDEBS"/linux-image-*.deb; do
 done
 [ -n "$KDEB" ] || die "no linux-image-*.deb in $KDEBS (build one with kernel/build.sh)"
 [ -f "$FW" ] || die "firmware $FW not found"
+# debian-archive-keyring ships .gpg files, newer versions .pgp ones
+[ -f "$KEYRING" ] || [ ! -f "${KEYRING%.gpg}.pgp" ] || KEYRING=${KEYRING%.gpg}.pgp
 [ -f "$KEYRING" ] || die "keyring $KEYRING not found (install debian-archive-keyring)"
 for t in mmdebstrap sfdisk mke2fs e2fsck dpkg-deb gzip sha256sum truncate; do
 	command -v "$t" >/dev/null || die "$t not found"

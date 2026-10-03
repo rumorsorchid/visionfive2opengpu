@@ -69,13 +69,17 @@ verisilicon-dc
 EOF
 
 # -- apt sources: Debian main only -----------------------------------------
-rm -f /etc/apt/sources.list
+signed=
+for k in "$SIGNED_BY" "${SIGNED_BY%.gpg}.pgp"; do
+	[ -f "$k" ] && { signed="Signed-By: $k"; break; }
+done
+rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list
 cat >/etc/apt/sources.list.d/vf2-image.sources <<EOF
 Types: deb
 URIs: $MIRROR
 Suites: $SUITE
 Components: $COMPONENTS
-Signed-By: $SIGNED_BY
+$signed
 EOF
 $APT update
 

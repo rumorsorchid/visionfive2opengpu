@@ -57,7 +57,7 @@ jobs:
 
       - name: Kernel cache
         id: kcache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /mnt/work/kdebs
           key: kernel-${{ hashFiles('kernel/**') }}
@@ -70,6 +70,14 @@ jobs:
           cp /mnt/work/kbuild/linux-image-*.deb /mnt/work/kdebs/
           rm -f /mnt/work/kdebs/*-dbg_*.deb
           rm -rf /mnt/work/kbuild /mnt/work/linux
+
+      # saved right away, so a failure in a later step keeps the kernel
+      - name: Save kernel cache
+        if: steps.kcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /mnt/work/kdebs
+          key: kernel-${{ hashFiles('kernel/**') }}
 
       - name: Image (Debian sid, built in a debian:sid container)
         run: |
