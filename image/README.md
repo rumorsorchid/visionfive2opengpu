@@ -57,18 +57,56 @@ first (`passwd`).
 ## 1. Get the image
 
 Download the newest `vf2-debian-sid-*.img.gz` and its `.sha256` from the
-repository's [releases](https://github.com/rumorsorchid/visionfive2opengpu/releases).
-From OpenBSD:
+repository's [releases](https://github.com/rumorsorchid/visionfive2opengpu/releases),
+and check the download:
 
 ```sh
-ftp https://github.com/rumorsorchid/visionfive2opengpu/releases/download/<tag>/<name>.img.gz
-ftp https://github.com/rumorsorchid/visionfive2opengpu/releases/download/<tag>/<name>.img.gz.sha256
-sha256 -C <name>.img.gz.sha256 <name>.img.gz
+shasum -a 256 <name>.img.gz       # macOS: compare with the hash in <name>.img.gz.sha256
+sha256 -C <name>.img.gz.sha256 <name>.img.gz             # OpenBSD
+sha256sum -c <name>.img.gz.sha256                        # Linux
 ```
 
-Or build it yourself (section 6).
+Or build it yourself (section 7).
 
-## 2. Write it to the NVMe drive from OpenBSD
+## 2. Try it from an SD card, then install it on the NVMe drive
+
+This leaves the NVMe drive (and an OpenBSD on it) alone until you decide.
+
+**Write the card on macOS with balenaEtcher:** *Flash from file*, pick the
+`.img.gz` as it is (Etcher unpacks it), pick the SD card, *Flash*. Etcher
+reads the card back to verify. Use a card of 8 GB or more, ideally a fast
+one (A1/A2): the desktop runs from it. macOS then says the disk is not
+readable: choose *Eject* (or *Ignore*), never *Initialize*.
+
+Without Etcher, in Terminal (`diskutil list` shows which `diskN` the card is):
+
+```sh
+diskutil unmountDisk /dev/diskN
+gunzip -c <name>.img.gz | sudo dd of=/dev/rdiskN bs=4m
+diskutil eject /dev/diskN
+```
+
+**Boot it:** leave the boot switches at flash boot (U-Boot in SPI flash is
+not touched), put the card in, power on. U-Boot scans SD before NVMe, so the
+card boots (section 4); section 5 describes the first boot. Take the card
+out and the board boots the NVMe drive as before.
+
+**Install on the NVMe drive** once you are happy with it, from the running
+system on the card:
+
+```sh
+sudo vf2-install-nvme            # erases the NVMe drive, OpenBSD included
+```
+
+It partitions the drive like the image and copies the running system,
+including your password, files, settings and the self-test result. The copy
+gets its own filesystem UUID. Then power off, take the card out and power on.
+
+Do not write the image to both the card and the drive instead. Both disks
+would then have the same filesystem UUID, and with both fitted Linux can
+mount either one as root.
+
+## 3. Or write it straight to the NVMe drive from OpenBSD
 
 Run OpenBSD from somewhere other than the target drive (SD card, eMMC or
 USB). On OpenBSD the NVMe drive is an `sd` disk:
@@ -87,36 +125,43 @@ sync
 ```
 
 The image is 3.8 GB unpacked (a 0.9 GB download). On first boot it grows
-to fill the drive.
-OpenBSD may warn that the backup GPT is not at the end of the disk. That
-is expected: first boot moves it.
+to fill the drive. OpenBSD may warn that the backup GPT is not at the end
+of the disk. That is expected: first boot moves it.
 
-From Linux, use the same command with `of=/dev/nvme0n1` (or the SD card
-device). On an SD card the image boots too (U-Boot finds it the same way).
+From Linux, use the same command with `of=/dev/nvme0n1`.
 
-## 3. Make U-Boot boot the NVMe drive
+## 4. Which disk U-Boot boots
 
-U-Boot's standard boot scans SD and eMMC before NVMe, so a bootable
-OpenBSD on an SD card or eMMC would still win. Pick one of these:
+U-Boot finds the image's partition because it is marked bootable. It reads
+`/boot/extlinux/extlinux.conf` from it and loads the kernel, initramfs and
+the rev 1.3B device tree from the installed kernel package.
 
-* remove the SD card that has OpenBSD on it, or
-* boot the NVMe once: interrupt autoboot (serial console, or a USB
-  keyboard with the HDMI screen) and type `bootflow scan -lb nvme`, or
-* make NVMe the first choice for good, keeping SD (`mmc1`) and eMMC (`mmc0`)
-  as fallbacks:
+Mainline U-Boot (with no `boot_targets` set, as in the
+[openbsd_hdmi_vf2](https://github.com/rumorsorchid/openbsd_hdmi_vf2) firmware)
+tries eMMC and SD before NVMe, and the EFI boot manager last. So:
 
-  ```
-  setenv boot_targets "nvme mmc1 mmc0 usb dhcp"
-  saveenv
-  ```
+* a bootable card in the slot boots first;
+* without it, the NVMe drive boots, whichever system is on it.
 
-  OpenBSD stays reachable with `bootflow scan -lb mmc1` (or `mmc0`).
+To boot one particular disk once, interrupt the autoboot (serial console,
+or a USB keyboard with the HDMI screen) and type:
 
-U-Boot finds the image's partition because it is marked bootable. It
-reads `/boot/extlinux/extlinux.conf` from it and loads the kernel,
-initramfs and the rev 1.3B device tree from the installed kernel package.
+```
+setenv boot_targets nvme
+bootflow scan
+```
 
-## 4. First boot
+Use `mmc1` for the SD card, or `mmc0` for eMMC. When `boot_targets` is set,
+U-Boot's EFI boot manager runs first, so a disk with an EFI loader (an
+OpenBSD install) can still win.
+
+* `saveenv` makes the order permanent only if U-Boot stores its environment.
+  The openbsd_hdmi_vf2 firmware deliberately does not (`ENV_IS_NOWHERE`), so
+  there the card decides.
+* `bootflow scan -lb ...` needs `CONFIG_BOOTSTD_FULL`, which that firmware
+  leaves out; plain `bootflow scan` works.
+
+## 5. First boot
 
 1. U-Boot loads the kernel within a few seconds. The screen can go dark
    for a few seconds while Linux takes over the display (docs/boot.md).
@@ -143,7 +188,7 @@ still read the reports. If the board hangs during the self-test, switch it
 off and on: the second boot sees the unfinished run, skips it, marks the
 GPU as failed and starts the desktop in software.
 
-## 5. Using it
+## 6. Using it
 
 | | |
 |---|---|
@@ -178,11 +223,12 @@ controller (wlroots allocates them there), and the GPU renders into them.
 
 ## Troubleshooting
 
-* **U-Boot boots OpenBSD (or nothing) instead.** See section 3. At the U-Boot
-  prompt, `nvme scan; part list nvme 0` should list partition 1 as
-  bootable, and `bootflow scan -l nvme` should list an extlinux bootflow.
-  If `printenv bootmeths` shows a value (for example only `efi`), clear it:
-  `setenv bootmeths; saveenv`.
+* **U-Boot boots OpenBSD (or nothing) instead.** See section 4. At the U-Boot
+  prompt, `part list mmc 1` (SD card) or `nvme scan; part list nvme 0` should
+  list partition 1 with the bootable flag, and
+  `ls mmc 1:1 /boot/extlinux` should show `extlinux.conf`. If
+  `printenv boot_targets` shows a value, `setenv boot_targets` clears it
+  for this boot.
 * **The kernel starts but the screen stays black.** Log in over the serial
   console (115200 8N1) or SSH (host `vf2`, user `vf2`), then run
   `sudo /usr/lib/vf2/board/vf2-gpu-check.sh` and see docs/boot.md, "When
@@ -229,7 +275,7 @@ the board's VL805 USB 3 controller run firmware stored on the chips
 themselves. The OS never loads it, and every computer with an SSD or USB 3
 has the same.
 
-## 6. Building the image
+## 7. Building the image
 
 On a Debian or Ubuntu x86_64 machine (or a riscv64 one), as root:
 

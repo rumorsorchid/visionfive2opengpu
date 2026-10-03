@@ -1,0 +1,99 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# vf2-install-nvme - copy the running system (booted from an SD card or
+# eMMC) to the NVMe drive, so it boots from there without the card.
+#
+#   sudo vf2-install-nvme [DISK]          (default: /dev/nvme0n1)
+#
+# Everything on DISK is erased. DISK gets one ext4 partition marked bootable
+# (as in the image), and the running system is copied onto it with its
+# settings, users, files and the first-boot GPU self-test result.
+#
+# The copy gets its own filesystem UUID. Writing the same image to the card
+# and the drive would instead leave two disks with the same UUID, and Linux
+# could mount either one as root whichever disk U-Boot booted from.
+#
+# U-Boot scans SD and eMMC before NVMe, so after the copy remove the card
+# (or boot the drive explicitly, see image/README.md).
+
+set -eu
+DISK=${1:-/dev/nvme0n1}
+die() { echo "vf2-install-nvme: $*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "run as root: sudo $0 $*"
+[ -b "$DISK" ] || die "$DISK is not a block device (is the NVMe drive fitted?)"
+[ "$(lsblk -dn -o TYPE "$DISK")" = disk ] || die "$DISK is not a whole disk"
+command -v rsync >/dev/null || die "rsync is missing (apt install rsync)"
+
+root=$(findmnt -n -o SOURCE /)
+rootdisk=/dev/$(lsblk -n -o PKNAME "$root" | head -n 1)
+[ "$rootdisk" != "$DISK" ] || die "the running system is on $DISK; boot from the SD card first"
+case $DISK in
+*[0-9]) PART=${DISK}p1 ;;
+*) PART=${DISK}1 ;;
+esac
+
+used=$(df -B1M --output=used / | tail -n 1 | tr -d ' ')
+size=$(($(blockdev --getsize64 "$DISK") / 1048576))
+[ "$size" -gt $((used + 1024)) ] || die "$DISK ($size MiB) is too small for this system ($used MiB used)"
+
+if awk -v d="$DISK" 'index($1, d) == 1 { found = 1 } END { exit !found }' /proc/mounts; then
+	die "partitions of $DISK are mounted; unmount them first"
+fi
+
+echo "This copies the running system ($root, $used MiB used) to $DISK."
+echo "EVERYTHING on $DISK is erased:"
+lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL "$DISK"
+printf 'Type YES to continue: '
+read -r answer
+[ "$answer" = YES ] || die "nothing changed"
+
+echo "== partitioning $DISK"
+wipefs -a -q "$DISK"
+sfdisk -q "$DISK" <<'EOF'
+label: gpt
+start=16MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=vf2-root, attrs=LegacyBIOSBootable
+EOF
+partx -u "$DISK" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+for _ in 1 2 3 4 5; do [ -b "$PART" ] && break; sleep 1; done
+[ -b "$PART" ] || die "$PART did not appear"
+
+echo "== creating the filesystem"
+# The same features as the image: readable by any mainline U-Boot.
+mkfs_ext4() { mke2fs -q -F -t ext4 -L vf2-root -m 1 "$@" "$PART"; }
+mkfs_ext4 -O ^metadata_csum_seed,^orphan_file 2>/dev/null || mkfs_ext4 -O ^metadata_csum_seed
+
+mnt=$(mktemp -d /run/vf2-install.XXXXXX)
+cleanup() { umount "$mnt" 2>/dev/null || true; rmdir "$mnt" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+mount "$PART" "$mnt"
+
+echo "== copying the system (a few minutes)"
+# One filesystem only: /proc, /sys, /dev, /run and tmpfs mounts stay out,
+# their mount points come along empty.
+rsync -aAXH --numeric-ids --one-file-system --info=progress2 \
+	--exclude=/lost+found --exclude='/var/tmp/*' --exclude='/var/cache/apt/archives/*.deb' \
+	/ "$mnt"/
+
+echo "== pointing the copy at its own filesystem"
+old=$(findmnt -n -o UUID /)
+new=$(blkid -s UUID -o value "$PART")
+for f in etc/fstab etc/default/u-boot boot/extlinux/extlinux.conf; do
+	[ -f "$mnt/$f" ] && sed -i "s/$old/$new/g" "$mnt/$f"
+done
+grep -q "^UUID=$new" "$mnt/etc/fstab" || die "could not update /etc/fstab on the copy"
+grep -q "root=UUID=$new" "$mnt/boot/extlinux/extlinux.conf" ||
+	die "could not update extlinux.conf on the copy"
+# The first-boot steps (growing, SSH keys) already ran on this system.
+mkdir -p "$mnt/var/lib/vf2"
+touch "$mnt/var/lib/vf2/firstboot-done"
+
+sync
+cleanup
+trap - EXIT INT TERM
+echo
+echo "Done: $DISK holds this system (root UUID $new)."
+echo "Power off, remove the SD card and power on: U-Boot then boots the NVMe drive."
+echo "With the card still in, U-Boot boots the card first."

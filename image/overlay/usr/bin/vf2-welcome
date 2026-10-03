@@ -36,6 +36,14 @@ else
 	echo "    no report (see: systemctl status vf2-selftest)"
 fi
 
+case $(findmnt -n -o SOURCE /) in
+/dev/mmcblk*)
+	echo
+	echo "  Running from the SD card (or eMMC). To install this system on the NVMe"
+	echo "  drive (erases it): sudo vf2-install-nvme, then power off and remove the card."
+	;;
+esac
+
 cat <<'EOF'
 
   The default login is vf2 / vf2, and SSH is on. Change the password now:

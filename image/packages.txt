@@ -24,6 +24,7 @@ kmod
 procps
 psmisc
 lsof
+rsync
 file
 less
 nano

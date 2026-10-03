@@ -42,7 +42,8 @@ Community results with this stack (Mesa 26.2, KMS, 1080p): vkmark
 The fastest way: write the flashable Debian sid image from the
 [releases](https://github.com/rumorsorchid/visionfive2opengpu/releases) to the NVMe
 drive (or an SD card) and boot. [image/README.md](image/README.md) explains
-how, including from OpenBSD. Everything below is the manual route, for
+how: try it from an SD card written with balenaEtcher, then
+`sudo vf2-install-nvme`, or write the NVMe drive directly from OpenBSD. Everything below is the manual route, for
 an existing Debian or Ubuntu installation.
 
 On an x86_64 (or riscv64) build host:

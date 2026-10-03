@@ -212,7 +212,7 @@ Architecture: all
 Section: misc
 Priority: optional
 Maintainer: VisionFive 2 open GPU image <root@localhost>
-Depends: systemd, cloud-guest-utils, fdisk, e2fsprogs, lsof, openfw-firmware
+Depends: systemd, cloud-guest-utils, fdisk, e2fsprogs, lsof, rsync, openfw-firmware
 Description: VisionFive 2 open GPU stack: desktop session, first boot, self-test
  The labwc session with GPU compositing on the PowerVR BXE-4-32 (through
  Zink), the first-boot service that grows the root filesystem, the GPU
