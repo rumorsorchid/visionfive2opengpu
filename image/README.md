@@ -21,13 +21,29 @@ first (`passwd`).
 
 ## What has and has not been tested
 
-* The build script was trial-run against Ubuntu's riscv64 archive. Debian's
-  mirrors were out of reach of the machine it was written on.
-  `qemu-test.py` boots an image in QEMU through mainline U-Boot's standard
-  boot and checks everything up to the board drivers: the extlinux
-  bootflow, compressed kernel and initramfs, root by UUID, growing to fill
-  the disk, the self-test skipping on non-JH7110 hardware, greetd
-  autologin into labwc, and no failed units.
+* The build script was trial-run against Ubuntu's riscv64 archive, because
+  Debian's mirrors were out of reach of the machine it was written on. That
+  image booted in QEMU through mainline U-Boot with the VisionFive 2's
+  standard-boot configuration, and `qemu-test.py` passed all eight checks:
+  * U-Boot found the extlinux bootflow on the bootable partition;
+  * the compressed kernel and initramfs loaded;
+  * root mounted by UUID, and the system came up with no failed units;
+  * first boot grew the root filesystem from 2 GB to fill a larger disk;
+  * the GPU self-test skipped cleanly (no JH7110);
+  * greetd logged `vf2` into labwc, which drew the panel and the welcome
+    terminal.
+
+  See [docs/evidence/image-qemu-test.txt](../docs/evidence/image-qemu-test.txt)
+  and the screenshot [image-qemu-desktop.png](../docs/evidence/image-qemu-desktop.png).
+  The trial runs caught three bugs before any of them reached a board:
+  * a file conflict with `systemd-zram-generator`;
+  * u-boot-menu 4.2 dropping the device-tree line, which would have booted
+    without GPU and HDMI;
+  * the desktop refusing to start without a keyboard plugged in.
+
+  Reviewing the boot path found a fourth: the NVMe root depended on clock
+  and PCIe modules the initramfs would not have loaded. These drivers are
+  now built into the kernel.
 * The released Debian sid images are built by GitHub Actions
   ([`.github/workflows/image.yml`](../.github/workflows/image.yml)) with the
   same script. Debian packages that are missing for riscv64 fail that build,

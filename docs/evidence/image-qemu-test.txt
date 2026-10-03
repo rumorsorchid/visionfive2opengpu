@@ -1,0 +1,38 @@
+image/qemu-test.py on a trial image (image/build.sh against Ubuntu noble riscv64 ports, Debian's mirrors
+being unreachable from the build machine), booted by mainline U-Boot 2026.10-rc5 qemu-riscv64_smode with
+CONFIG_BOOTSTD_DEFAULTS and the VisionFive 2's default boot command (bootflow scan), OpenSBI 1.7,
+QEMU 8.2 virt, 4 harts, 4 GiB, disk grown by 4 GiB. Kernel: kernel/build.sh blob-free build.
+
+PASS  U-Boot standard boot found the extlinux bootflow
+PASS  kernel started
+PASS  login prompt on the serial console (67 s)
+PASS  system state: running
+PASS  failed units: none
+PASS  root filesystem grown to 5948 MiB (image partition 1984 MiB)
+PASS  GPU self-test result on QEMU: skipped (expected skipped)
+PASS  labwc runs for the autologin user
+--- ls -l /dev/dri
+total 0
+drwxr-xr-x  2 root root         80 Oct  3 10:36 by-path
+crw-rw----+ 1 root video  226,   0 Oct  3 10:37 card0
+crw-rw----+ 1 root render 226, 128 Oct  3 10:36 renderD128
+--- journalctl -k -b --no-pager -o cat | grep -iE 'virtio.*gpu|drm|fb0' | head
+Starting modprobe@drm.service - Load Kernel Module drm...
+modprobe@drm.service: Deactivated successfully.
+Finished modprobe@drm.service - Load Kernel Module drm.
+[drm] pci: virtio-gpu-pci detected at 0000:00:01.0
+[drm] features: -virgl +edid -resource_blob -host_visible
+[drm] features: -context_init -blob_alignment
+[drm] number of scanouts: 1
+[drm] number of cap sets: 0
+[drm] Initialized virtio_gpu 0.1.0 for 0000:00:01.0 on minor 0
+virtio-pci 0000:00:01.0: [drm] fb0: virtio_gpudrmfb frame buffer device
+--- loginctl list-sessions --no-legend
+1 1000 vf2 seat0 tty7  active no -
+2 1000 vf2 -     ttyS0 active no -
+--- journalctl -b -u greetd --no-pager -o cat | tail -n 15
+Started greetd.service - Greeter daemon.
+PAM unable to dlopen(pam_lastlog.so): /usr/lib/security/pam_lastlog.so: cannot open shared object file: No such file or directory
+PAM adding faulty module: pam_lastlog.so
+pam_unix(greetd:session): session opened for user vf2(uid=1000) by vf2(uid=0)
+--- tail -n 40 ~/.local/state/vf2-session.log

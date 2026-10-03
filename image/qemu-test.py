@@ -13,7 +13,7 @@ without failed units.
   sudo image/qemu-test.py IMAGE.img[.gz] --uboot u-boot.bin [--opensbi fw_jump.bin]
 
 U-Boot: mainline qemu-riscv64_smode_defconfig with CONFIG_BOOTSTD_DEFAULTS,
-CONFIG_BOOTCOMMAND="bootflow scan -lb" (as on the VisionFive 2).
+CONFIG_BOOTCOMMAND="bootflow scan" (the VisionFive 2 default).
 The test works on a copy: only the copy's extlinux.conf loses its fdt line
 (the JH7110 device tree would not boot QEMU's virt machine).
 """
@@ -33,11 +33,11 @@ import zlib
 import struct
 
 
-def sh(*cmd, **kw):
-    return subprocess.run(cmd, check=True, text=True, capture_output=True, **kw).stdout
+def sh(*cmd, stderr=subprocess.PIPE):
+    return subprocess.run(cmd, check=True, text=True, stdout=subprocess.PIPE, stderr=stderr).stdout
 
 
-def prepare(image, work, grow_gib):
+def prepare(image, work, grow_gib, puts=()):
     test = os.path.join(work, "test.img")
     if image.endswith(".gz"):
         with gzip.open(image, "rb") as src, open(test, "wb") as dst:
@@ -65,6 +65,13 @@ def prepare(image, work, grow_gib):
         f.write(edited + "\n")
     sh("debugfs", "-w", "-R", "rm /boot/extlinux/extlinux.conf", fs)
     sh("debugfs", "-w", "-R", f"write {local} /boot/extlinux/extlinux.conf", fs)
+    for put in puts:
+        src, dst = put.split(":", 1)
+        mode = os.stat(src).st_mode
+        sh("debugfs", "-w", "-R", f"rm {dst}", fs, stderr=subprocess.DEVNULL)
+        sh("debugfs", "-w", "-R", f"write {src} {dst}", fs)
+        sh("debugfs", "-w", "-R", f"sif {dst} mode 0{mode:o}", fs)
+        print(f"replaced {dst} in the test copy with {src}")
     with open(fs, "rb") as i, open(test, "r+b") as f:
         f.seek(start)
         shutil.copyfileobj(i, f, 16 << 20)
@@ -151,7 +158,10 @@ def main():
     ap.add_argument("--grow", type=int, default=4, help="GiB added to the disk to test growing")
     ap.add_argument("--timeout", type=int, default=2400, help="seconds to wait for the login prompt")
     ap.add_argument("--out", default=".", help="directory for serial log and screenshot")
+    ap.add_argument("--put", action="append", default=[], metavar="LOCAL:/PATH",
+                    help="replace a file in the test copy (try a change without rebuilding)")
     a = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)
 
     work = tempfile.mkdtemp(prefix="vf2-qemu-", dir=os.environ.get("TMPDIR", "/var/tmp"))
     fails = []
@@ -162,15 +172,15 @@ def main():
             fails.append(what)
 
     try:
-        disk, part_size = prepare(a.image, work, a.grow)
+        disk, part_size = prepare(a.image, work, a.grow, a.put)
         mon = os.path.join(work, "monitor.sock")
         cmd = ["qemu-system-riscv64", "-M", "virt", "-smp", "4", "-m", "4G",
                "-accel", "tcg,thread=multi", "-nographic",
                "-bios", a.opensbi, "-kernel", a.uboot,
                "-drive", f"file={disk},format=raw,if=none,id=hd0", "-device", "virtio-blk-device,drive=hd0",
                "-netdev", "user,id=n0", "-device", "virtio-net-device,netdev=n0",
-               "-device", "virtio-gpu-device", "-device", "virtio-keyboard-device",
-               "-device", "virtio-tablet-device",
+               "-device", "virtio-gpu-pci", "-device", "virtio-keyboard-pci",
+               "-device", "virtio-tablet-pci",
                "-monitor", f"unix:{mon},server,nowait"]
         print(" ".join(cmd))
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -197,7 +207,11 @@ def main():
         st = ser.run("cat /var/lib/vf2/gpu-status")
         check((st or "").strip() == "skipped", f"GPU self-test result on QEMU: {(st or '').strip()} (expected skipped)")
         check(bool((ser.run("pgrep -u " + a.user + " -x labwc") or "").strip()), "labwc runs for the autologin user")
-        print(ser.run("tail -n 5 ~/.local/state/vf2-session.log"))
+        for diag in ("ls -l /dev/dri", "journalctl -k -b --no-pager -o cat | grep -iE 'virtio.*gpu|drm|fb0' | head",
+                     "loginctl list-sessions --no-legend",
+                     "journalctl -b -u greetd --no-pager -o cat | tail -n 15",
+                     "tail -n 40 ~/.local/state/vf2-session.log"):
+            print(f"--- {diag}\n{ser.run(diag)}")
         print(ser.run("cat /proc/cmdline"))
         kfw = ser.run("journalctl -k -b --no-pager | grep -iE 'firmware|direct firmware load' | head -n 5")
         print("kernel firmware messages:", kfw or "none")

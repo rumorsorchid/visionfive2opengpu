@@ -19,6 +19,8 @@ VF2_RENDERER=${VF2_RENDERER:-auto}
 
 export XDG_CURRENT_DESKTOP=labwc:wlroots XDG_SESSION_DESKTOP=labwc XDG_SESSION_TYPE=wayland
 export MOZ_ENABLE_WAYLAND=1 QT_QPA_PLATFORM='wayland;xcb' _JAVA_AWT_WM_NONREPARENTING=1
+# Start even with no keyboard or mouse plugged in yet (they hot-plug).
+export WLR_LIBINPUT_NO_DEVICES=1
 # Mesa's PowerVR Vulkan driver is not conformance tested on BXE-4-32 yet;
 # Zink and every Vulkan application need these (greetd does not read
 # /etc/environment.d).
