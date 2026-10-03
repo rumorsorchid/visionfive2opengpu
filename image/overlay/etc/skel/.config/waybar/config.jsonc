@@ -15,7 +15,8 @@
   "memory": { "format": "RAM {percentage}%" },
   "temperature": { "format": "{temperatureC}°C" },
   "network": { "format-ethernet": "{ipaddr}", "format-wifi": "{essid}", "format-disconnected": "offline",
-               "tooltip-format": "{ifname} {ipaddr}/{cidr}", "on-click": "nm-connection-editor" },
+               "tooltip-format": "{ifname} {ipaddr}/{cidr}",
+               "on-click": "command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec foot nmtui" },
   "pulseaudio": { "format": "VOL {volume}%", "format-muted": "muted", "on-click": "pavucontrol" },
   "tray": { "spacing": 6 }
 }

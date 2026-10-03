@@ -1,6 +1,9 @@
 # Installed when the archive has them for riscv64; skipped (and listed in
 # /usr/share/doc/vf2-integration/skipped-packages) otherwise.
 
+# network tray applet and editor (the panel falls back to nmtui)
+network-manager-gnome
+
 # more GPU tests and tools
 kmscube
 drm-info

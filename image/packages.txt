@@ -71,7 +71,6 @@ slurp
 wl-clipboard
 wlr-randr
 thunar
-network-manager-gnome
 pipewire-audio
 pavucontrol
 fonts-dejavu-core
